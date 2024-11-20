@@ -20,7 +20,8 @@ class KabelVerlegungsTool(QDialog):
         self.iface = iface
         self.ui = Ui_KabelVerlegungsToolDialogBase()
         self.ui.setupUi(self)
-
+        self.ui.comboBox_kabel_typ.currentIndexChanged.connect(self.update_selected_kabel_label)
+        self.ui.comboBox_kabel_typ_2.currentIndexChanged.connect(self.update_selected_kabel_label_2)
 
         # Initialisiere wichtige Variablen
         self.plugin_dir = os.path.dirname(__file__)  # Verzeichnis des aktuellen Skripts
@@ -331,6 +332,21 @@ class KabelVerlegungsTool(QDialog):
         finally:
             if conn is not None:
                 conn.close()
+
+    def update_selected_kabel_label(self):
+        if self.ui.comboBox_kabel_typ.currentIndex() >= 0:
+            selected_kabel = self.ui.comboBox_kabel_typ.currentText()
+            self.ui.label_gewaehltes_kabel.setText(f"Ausgewähltes Kabel: {selected_kabel}")
+        else:
+            self.ui.label_gewaehltes_kabel.clear()
+            
+    def update_selected_kabel_label_2(self):
+        if self.ui.comboBox_kabel_typ_2.currentIndex() >= 0:
+            selected_kabel = self.ui.comboBox_kabel_typ_2.currentText()
+            self.ui.label_gewaehltes_kabel_2.setText(f"Ausgewähltes Kabel: {selected_kabel}")
+        else:
+            self.ui.label_gewaehltes_kabel_2.clear()
+
 
     def onKabelChanged(self):
         """Funktion, um das ausgewählte Kabel im Label nur bei Benutzerinteraktion anzuzeigen"""
