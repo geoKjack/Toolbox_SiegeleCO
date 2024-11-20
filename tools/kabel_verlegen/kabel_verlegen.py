@@ -14,34 +14,32 @@ import psycopg2
 
 from .kabel_verlegen_dialog import Ui_KabelVerlegungsToolDialogBase
 
-class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
-    """QGIS Plugin Implementation."""
-
+class KabelVerlegungsTool(QDialog):
     def __init__(self, iface, parent=None):
-        """Constructor."""
-        super(KabelVerlegungsTool, self).__init__(parent)  # Korrekte Initialisierung von QDialog
+        super(KabelVerlegungsTool, self).__init__(parent)
         self.iface = iface
-        self.ui = Ui_KabelVerlegungsToolDialogBase()  # UI-Instanz
-        self.ui.setupUi(self)  # Setup der UI auf dem Dialog
+        self.ui = Ui_KabelVerlegungsToolDialogBase()
+        self.ui.setupUi(self)
 
-        self.map_tool = QgsMapToolEmitPoint(iface.mapCanvas())
-        self.plugin_dir = os.path.dirname(__file__)
-        locale = QSettings().value('locale/userLocale')[0:2]
-        locale_path = os.path.join(self.plugin_dir, 'i18n', 'KabelVerlegungsTool_{}.qm'.format(locale))
 
-        if os.path.exists(locale_path):
-            self.translator = QTranslator()
-            self.translator.load(locale_path)
-            QCoreApplication.installTranslator(self.translator)
+        # Initialisiere wichtige Variablen
+        self.plugin_dir = os.path.dirname(__file__)  # Verzeichnis des aktuellen Skripts
+        self.map_tool = None
+        self.first_start = True  # Initialer Zustand
 
-        self.actions = []
-        self.menu = self.tr(u'&Kabel Verlegen')
-        self.first_start = None
-        
-        # Initialisiere die Highlight-Variablen
+        # Variablen für Highlights
         self.startknoten_highlight = None
         self.endknoten_highlight = None
         self.verlauf_highlights = []
+
+        # Setze das Fenster "immer im Vordergrund"
+        self.setWindowFlag(Qt.WindowStaysOnTopHint)
+
+        # Variablen für Highlights und IDs initialisieren
+        self.startknoten_highlight = None
+        self.endknoten_highlight = None
+        self.verlauf_highlights = []
+
         
         self.startknoten2_highlight = None
         self.endknoten2_highlight = None
@@ -113,22 +111,21 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
 
     def run(self):
         """Run method that performs all the real work"""
+        # Initialisierung nur beim ersten Start
         if self.first_start:
             self.first_start = False
 
             # Icon für Tool im Toolfenster setzen
             icon_path = os.path.join(self.plugin_dir, 'icon.png')
             if os.path.exists(icon_path):
-                print(f"Icon gefunden unter: {icon_path}")
                 self.setWindowIcon(QIcon(icon_path))
             else:
-                print(f"Icon nicht gefunden unter: {icon_path}")
                 QgsMessageLog.logMessage(f"Icon nicht gefunden unter: {icon_path}", level=Qgis.Warning)
 
             # Setze das Fenster "immer im Vordergrund"
             self.setWindowFlag(Qt.WindowStaysOnTopHint)
 
-            # Setup der Buttons und Verbindungen von Tab 1
+            # Setup der Buttons und Verbindungen (Tab 1)
             self.ui.pushButton_startpunkt.clicked.connect(self.aktion_startknoten)
             self.ui.pushButton_endpunkt.clicked.connect(self.aktion_endpunkt)
             self.ui.pushButton_verlauf.clicked.connect(self.aktion_verlauf)
@@ -136,7 +133,7 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
             self.ui.pushButton_Datenpruefung.clicked.connect(self.pruefe_verbindung)
             self.ui.pushButton_Import.clicked.connect(self.daten_importieren)
             
-            # Setup der Buttons und Verbindungen von Tab 2
+            # Setup der Buttons und Verbindungen (Tab 2)
             self.ui.pushButton_startpunkt_2.clicked.connect(self.aktion_startknoten_2)
             self.ui.pushButton_virtueller_knoten.clicked.connect(self.aktion_virtuellerknoten_2)
             self.ui.pushButton_hausanschluss.clicked.connect(self.aktion_endpunkt_2)
@@ -145,36 +142,26 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
             self.ui.pushButton_Datenpruefung_2.clicked.connect(self.pruefe_verbindung_2)
             self.ui.pushButton_Import_2.clicked.connect(self.daten_importieren_2)
 
-            # Import-Button initial deaktivieren
+            # Import-Buttons initial deaktivieren
             self.ui.pushButton_Import.setEnabled(False)
             self.ui.pushButton_Import_2.setEnabled(False)
             
-            # Kabelauswahl an die Funktion binden
-            self.ui.comboBox_kabel_typ.currentIndexChanged.connect(self.onKabelChanged)
-            self.ui.comboBox_kabel_typ_2.currentIndexChanged.connect(self.onKabelChanged_2)
-
-            # Fülle die Verlegestatus-ComboBox mit den gewünschten Werten für Tab 1 und Tab 2
-            verlegestatus_items = ["Geplant", "Eingeblasen - inaktiv", "Eingeblasen - aktiv", "Defekt"]
-            self.ui.comboBox_Verlegestatus.addItems(verlegestatus_items)
-            self.ui.comboBox_Verlegestatus_2.addItems(verlegestatus_items)
+            # Dropdowns für Kabeltyp und Verlegestatus füllen
+            self.ui.comboBox_Verlegestatus.addItems(["Geplant", "Eingeblasen - inaktiv", "Eingeblasen - aktiv", "Defekt"])
+            self.ui.comboBox_Verlegestatus_2.addItems(["Geplant", "Eingeblasen - inaktiv", "Eingeblasen - aktiv", "Defekt"])
+            self.ui.comboBox_Gefoerdert.addItems(["Ja", "Nein"])
+            self.ui.comboBox_Gefoerdert_2.addItems(["Ja", "Nein"])
             
-            # Initialisiere die Werte der ComboBox für Gefördert für Tab 1 und Tab 2
-            gefoerdert_items = ["Ja", "Nein"]
-            self.ui.comboBox_Gefoerdert.clear()
-            self.ui.comboBox_Gefoerdert.addItems(gefoerdert_items)
-            self.ui.comboBox_Gefoerdert_2.clear()
-            self.ui.comboBox_Gefoerdert_2.addItems(gefoerdert_items)
-
-            # Kabeltypen aus der Datenbank füllen
+            # Kabeltypen füllen
             self.populate_kabel_typen()
             self.populate_kabel_typen_2()
 
-            # Verknüpfe den Reset- und Abbrechen-Button mit den entsprechenden Funktionen
+            # Reset- und Abbrechen-Buttons verbinden
             self.ui.button_box.button(self.ui.button_box.Reset).clicked.connect(self.reset_form)
             self.ui.button_box_2.button(self.ui.button_box.Reset).clicked.connect(self.reset_form_2)
             self.ui.button_box.button(self.ui.button_box.Cancel).clicked.connect(self.on_close_dialog)
             self.ui.button_box_2.button(self.ui.button_box.Cancel).clicked.connect(self.on_close_dialog)
-            
+
             # Initialisieren Sie alle ComboBoxen auf leer (Index -1)
             self.ui.comboBox_kabel_typ.setCurrentIndex(-1)
             self.ui.comboBox_kabel_typ_2.setCurrentIndex(-1)
@@ -182,9 +169,10 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
             self.ui.comboBox_Verlegestatus_2.setCurrentIndex(-1)
             self.ui.comboBox_Gefoerdert.setCurrentIndex(-1)
             self.ui.comboBox_Gefoerdert_2.setCurrentIndex(-1)
-            
+
         # Zeige das Dialogfenster
         self.show()
+
 
     
     def reset_form(self):
@@ -204,31 +192,31 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
         self.verlauf_highlights.clear()
         
         # Setze das gesamte Formular zurück
-        self.dlg.label_startpunkt.clear()  # Startpunkt zurücksetzen
-        self.dlg.label_endpunkt.clear()    # Endpunkt zurücksetzen
-        self.dlg.label_verlauf.clear()     # Verlauf zurücksetzen
-        self.dlg.tableView_Vorschau.setModel(None)  # Vorschau-Tabelle zurücksetzen
+        self.ui.label_startpunkt.clear()  # Startpunkt zurücksetzen
+        self.ui.label_endpunkt.clear()    # Endpunkt zurücksetzen
+        self.ui.label_verlauf.clear()     # Verlauf zurücksetzen
+        self.ui.tableView_Vorschau.setModel(None)  # Vorschau-Tabelle zurücksetzen
 
         # Vorübergehend den Eventhandler trennen, um unerwünschte Updates zu vermeiden
-        self.dlg.comboBox_kabel_typ.blockSignals(True)
-        self.dlg.comboBox_kabel_typ.setCurrentIndex(-1)  # ComboBox auf keinen Eintrag setzen
-        self.dlg.comboBox_kabel_typ.blockSignals(False)
+        self.ui.comboBox_kabel_typ.blockSignals(True)
+        self.ui.comboBox_kabel_typ.setCurrentIndex(-1)  # ComboBox auf keinen Eintrag setzen
+        self.ui.comboBox_kabel_typ.blockSignals(False)
         
-        self.dlg.comboBox_Verlegestatus.setCurrentIndex(0)  # Verlegestatus zurücksetzen
-        self.dlg.comboBox_Gefoerdert.setCurrentIndex(0)  # Gefördert-Status zurücksetzen
-        self.dlg.label_Kommentar.clear()  # Kommentar zurücksetzen
-        self.dlg.label_Kommentar_2.clear()  # Kommentar zurücksetzen
-        self.dlg.label_Pruefung.clear()  # Prüfungsergebnis zurücksetzen
+        self.ui.comboBox_Verlegestatus.setCurrentIndex(0)  # Verlegestatus zurücksetzen
+        self.ui.comboBox_Gefoerdert.setCurrentIndex(0)  # Gefördert-Status zurücksetzen
+        self.ui.label_Kommentar.clear()  # Kommentar zurücksetzen
+        self.ui.label_Kommentar_2.clear()  # Kommentar zurücksetzen
+        self.ui.label_Pruefung.clear()  # Prüfungsergebnis zurücksetzen
         # Hintergrundfarbe von label_Pruefung auf Standardfarbe zurücksetzen
-        self.dlg.label_Pruefung.setStyleSheet("")  # Entfernt alle Styles und setzt den Standardhintergrund
+        self.ui.label_Pruefung.setStyleSheet("")  # Entfernt alle Styles und setzt den Standardhintergrund
 
-        self.dlg.label_gewaehltes_kabel.clear()  # Label für gewähltes Kabel zurücksetzen
+        self.ui.label_gewaehltes_kabel.clear()  # Label für gewähltes Kabel zurücksetzen
         self.startpunkt_id = None
         self.endpunkt_id = None
         self.verlauf_ids = []
 
         # Import-Button deaktivieren
-        self.dlg.pushButton_Import.setEnabled(False)
+        self.ui.pushButton_Import.setEnabled(False)
         
     def reset_form_2(self):
         """Setzt das gesamte Formular des zweiten Tabs zurück und entfernt alle Highlights"""
@@ -249,25 +237,25 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
         self.verlauf2_highlights.clear()
 
         # Setze das gesamte Formular von Tab 2 zurück
-        self.dlg.label_startpunkt_2.clear()  # Startpunkt zurücksetzen
-        self.dlg.label_virtueller_knoten.clear()  # Virtueller Knoten zurücksetzen
-        self.dlg.label_hausanschluss.clear()  # Hausanschlusspunkt zurücksetzen
-        self.dlg.label_verlauf_2.clear()  # Verlauf zurücksetzen
-        self.dlg.tableView_Vorschau_2.setModel(None)  # Vorschau-Tabelle zurücksetzen
+        self.ui.label_startpunkt_2.clear()  # Startpunkt zurücksetzen
+        self.ui.label_virtueller_knoten.clear()  # Virtueller Knoten zurücksetzen
+        self.ui.label_hausanschluss.clear()  # Hausanschlusspunkt zurücksetzen
+        self.ui.label_verlauf_2.clear()  # Verlauf zurücksetzen
+        self.ui.tableView_Vorschau_2.setModel(None)  # Vorschau-Tabelle zurücksetzen
 
         # Vorübergehend den Eventhandler trennen, um unerwünschte Updates zu vermeiden
-        self.dlg.comboBox_kabel_typ_2.blockSignals(True)
-        self.dlg.comboBox_kabel_typ_2.setCurrentIndex(-1)  # ComboBox auf keinen Eintrag setzen
-        self.dlg.comboBox_kabel_typ_2.blockSignals(False)
+        self.ui.comboBox_kabel_typ_2.blockSignals(True)
+        self.ui.comboBox_kabel_typ_2.setCurrentIndex(-1)  # ComboBox auf keinen Eintrag setzen
+        self.ui.comboBox_kabel_typ_2.blockSignals(False)
 
-        self.dlg.comboBox_Verlegestatus_2.setCurrentIndex(0)  # Verlegestatus zurücksetzen
-        self.dlg.comboBox_Gefoerdert_2.setCurrentIndex(0)  # Gefördert-Status zurücksetzen
-        self.dlg.label_Kommentar_3.clear()  # Kommentar zurücksetzen
-        self.dlg.label_Pruefung_2.clear()  # Prüfungsergebnis zurücksetzen
-        self.dlg.label_gewaehltes_kabel_2.clear()  # Label für gewähltes Kabel zurücksetzen
+        self.ui.comboBox_Verlegestatus_2.setCurrentIndex(0)  # Verlegestatus zurücksetzen
+        self.ui.comboBox_Gefoerdert_2.setCurrentIndex(0)  # Gefördert-Status zurücksetzen
+        self.ui.label_Kommentar_3.clear()  # Kommentar zurücksetzen
+        self.ui.label_Pruefung_2.clear()  # Prüfungsergebnis zurücksetzen
+        self.ui.label_gewaehltes_kabel_2.clear()  # Label für gewähltes Kabel zurücksetzen
         
         # Hintergrundfarbe von label_Pruefung auf Standardfarbe zurücksetzen
-        self.dlg.label_Pruefung_2.setStyleSheet("")  # Entfernt alle Styles und setzt den Standardhintergrund
+        self.ui.label_Pruefung_2.setStyleSheet("")  # Entfernt alle Styles und setzt den Standardhintergrund
 
         # Setze die Start-, End- und Verlaufsvariablen für den zweiten Tab zurück
         self.startpunkt_id_2 = None
@@ -276,7 +264,7 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
         self.verlauf_ids_2 = []
 
         # Import-Button deaktivieren
-        self.dlg.pushButton_Import_2.setEnabled(False)
+        self.ui.pushButton_Import_2.setEnabled(False)
 
     def get_database_connection(self):
         """Holt die aktuelle Datenbankverbindung."""
@@ -309,7 +297,7 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
             kabel_typen = cur.fetchall()
 
             for typ in kabel_typen:
-                self.dlg.comboBox_kabel_typ.addItem(f"{typ[1]}", typ[0])  # Text und ID hinzufügen
+                self.ui.comboBox_kabel_typ.addItem(f"{typ[1]}", typ[0])  # Text und ID hinzufügen
 
         except Exception as e:
             self.iface.messageBar().pushMessage("Fehler", str(e), level=Qgis.Critical)
@@ -336,7 +324,7 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
             kabel_typen = cur.fetchall()
 
             for typ in kabel_typen:
-                self.dlg.comboBox_kabel_typ_2.addItem(f"{typ[1]}", typ[0])  # Text und ID hinzufügen
+                self.ui.comboBox_kabel_typ_2.addItem(f"{typ[1]}", typ[0])  # Text und ID hinzufügen
 
         except Exception as e:
             self.iface.messageBar().pushMessage("Fehler", str(e), level=Qgis.Critical)
@@ -346,15 +334,15 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
 
     def onKabelChanged(self):
         """Funktion, um das ausgewählte Kabel im Label nur bei Benutzerinteraktion anzuzeigen"""
-        if self.dlg.comboBox_kabel_typ.hasFocus():  # Überprüfen, ob die ComboBox den Fokus hat (vom Benutzer ausgewählt)
-            selected_kabel = self.dlg.comboBox_kabel_typ.currentText()
-            self.dlg.label_gewaehltes_kabel.setText(f"{selected_kabel}")
+        if self.ui.comboBox_kabel_typ.hasFocus():  # Überprüfen, ob die ComboBox den Fokus hat (vom Benutzer ausgewählt)
+            selected_kabel = self.ui.comboBox_kabel_typ.currentText()
+            self.ui.label_gewaehltes_kabel.setText(f"{selected_kabel}")
 
     def onKabelChanged_2(self):
         """Funktion, um das ausgewählte Kabel im zweiten Tab anzuzeigen"""
-        if self.dlg.comboBox_kabel_typ_2.hasFocus():  # Überprüfen, ob die ComboBox den Fokus hat
-            selected_kabel = self.dlg.comboBox_kabel_typ_2.currentText()
-            self.dlg.label_gewaehltes_kabel_2.setText(f"{selected_kabel}")
+        if self.ui.comboBox_kabel_typ_2.hasFocus():  # Überprüfen, ob die ComboBox den Fokus hat
+            selected_kabel = self.ui.comboBox_kabel_typ_2.currentText()
+            self.ui.label_gewaehltes_kabel_2.setText(f"{selected_kabel}")
 
     def get_next_kabel_id(self):
         """Ermittelt die nächste verfügbare Kabel-ID."""
@@ -404,7 +392,7 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
             selected_features = layer.selectedFeatures()
             if selected_features:
                 startpunkt_id = selected_features[0].id()
-                self.dlg.label_startpunkt.setText(f"Startknoten: {startpunkt_id}")
+                self.ui.label_startpunkt.setText(f"Startknoten: {startpunkt_id}")
                 self.startpunkt_id = startpunkt_id
 
                 # Setzt Highlight für neuen Startknoten
@@ -436,7 +424,7 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
             selected_features = layer.selectedFeatures()
             if selected_features:
                 endpunkt_id = selected_features[0].id()
-                self.dlg.label_endpunkt.setText(f"Endpunkt: {endpunkt_id}")
+                self.ui.label_endpunkt.setText(f"Endpunkt: {endpunkt_id}")
                 self.endpunkt_id = endpunkt_id
 
                 # Setzt Highlight für neuen Endknoten
@@ -456,7 +444,7 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
     def aktion_verlauf(self):
         """Aktion für den Verlauf"""
         # Setze das Verlauf-Label und die Verlaufs-IDs zurück
-        self.dlg.label_verlauf.clear()
+        self.ui.label_verlauf.clear()
         self.verlauf_ids.clear()
         
         # Entferne alle bisherigen Highlights für den Verlauf
@@ -483,7 +471,7 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
 
                 # Aktualisiere das Label mit den IDs
                 verlauf_text = "; ".join(map(str, self.verlauf_ids))  # Semikolon-getrennt
-                self.dlg.label_verlauf.setText(f"Verlauf: {verlauf_text}")
+                self.ui.label_verlauf.setText(f"Verlauf: {verlauf_text}")
 
                 # Highlight-Funktion für die Geometrien
                 for feature in filtered_features:
@@ -508,10 +496,10 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
     def kabelverlauf_erstellen(self):
         """Funktion, um den Kabelverlauf in der Tabellenansicht anzuzeigen."""
         # Zusätzliche Attribute aus den Eingabefeldern holen
-        kommentar = self.dlg.label_Kommentar.text()  # Kommentar
-        bezeichnung_intern = self.dlg.label_Kommentar_2.text()  # Bezeichnung_intern (Neues Attribut)
-        verlegestatus = self.dlg.comboBox_Verlegestatus.currentText()  # Verlegestatus
-        gefoerdert = self.dlg.comboBox_Gefoerdert.currentText()  # Gefördert
+        kommentar = self.ui.label_Kommentar.text()  # Kommentar
+        bezeichnung_intern = self.ui.label_Kommentar_2.text()  # Bezeichnung_intern (Neues Attribut)
+        verlegestatus = self.ui.comboBox_Verlegestatus.currentText()  # Verlegestatus
+        gefoerdert = self.ui.comboBox_Gefoerdert.currentText()  # Gefördert
 
         # Erstellt eine Liste mit Zeilen, die in die Tabelle eingefügt werden
         kabelverlauf_daten = []
@@ -573,20 +561,20 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
             model.appendRow(row)
 
         # Setze das Modell in die TableView
-        self.dlg.tableView_Vorschau.setModel(model)
+        self.ui.tableView_Vorschau.setModel(model)
 
     def pruefe_verbindung(self):
         """Prüft, ob die Leerrohre eine durchgehende Verbindung ohne Lücken darstellen."""
         # Überprüfen, ob ein Kabeltyp gewählt wurde
-        if self.dlg.comboBox_kabel_typ.currentIndex() == -1:
-            self.dlg.label_Pruefung.setText("Kein Kabeltyp ausgewählt.")
-            self.dlg.label_Pruefung.setStyleSheet("background-color: lightcoral;")  # Hintergrund auf Rot setzen
+        if self.ui.comboBox_kabel_typ.currentIndex() == -1:
+            self.ui.label_Pruefung.setText("Kein Kabeltyp ausgewählt.")
+            self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")  # Hintergrund auf Rot setzen
             return
 
         # Überprüfen, ob Start-, Endpunkt oder Verlauf fehlt
         if not self.startpunkt_id or not self.endpunkt_id or not self.verlauf_ids:
-            self.dlg.label_Pruefung.setText("Unvollständige Daten.")
-            self.dlg.label_Pruefung.setStyleSheet("background-color: lightcoral;")  # Hintergrund auf Rot setzen
+            self.ui.label_Pruefung.setText("Unvollständige Daten.")
+            self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")  # Hintergrund auf Rot setzen
             return
 
         korrekt = True  # Variable korrekt initialisieren
@@ -609,12 +597,12 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
 
         # Am Ende prüfen, ob der letzte Knoten mit dem Endknoten übereinstimmt
         if korrekt and letzter_knoten == self.endpunkt_id:
-            self.dlg.label_Pruefung.setText("Verlauf ist korrekt verbunden. Daten können importiert werden")
-            self.dlg.label_Pruefung.setStyleSheet("background-color: lightgreen;")  # Hintergrund auf Grün setzen
-            self.dlg.pushButton_Import.setEnabled(True)  # Import-Button aktivieren
+            self.ui.label_Pruefung.setText("Verlauf ist korrekt verbunden. Daten können importiert werden")
+            self.ui.label_Pruefung.setStyleSheet("background-color: lightgreen;")  # Hintergrund auf Grün setzen
+            self.ui.pushButton_Import.setEnabled(True)  # Import-Button aktivieren
         else:
-            self.dlg.label_Pruefung.setText("Verlauf ist nicht verbunden. Bitte überprüfen Sie die Auswahl")
-            self.dlg.label_Pruefung.setStyleSheet("background-color: lightcoral;")  # Hintergrund auf Rot setzen
+            self.ui.label_Pruefung.setText("Verlauf ist nicht verbunden. Bitte überprüfen Sie die Auswahl")
+            self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")  # Hintergrund auf Rot setzen
 
     def get_kabeltyp_id(self, kabel_name):
         """Funktion, um die ID des Kabeltyps basierend auf dem Namen abzurufen"""
@@ -650,7 +638,7 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
         """Importiert die geprüften Daten in die Datenbank."""
         try:
             # Datum aus dem DateTimeEdit-Feld für Streckenkabel abrufen
-            datum_verlegt = self.dlg.mDateTimeEdit_Strecke.dateTime().toString("yyyy-MM-dd HH:mm:ss")
+            datum_verlegt = self.ui.mDateTimeEdit_Strecke.dateTime().toString("yyyy-MM-dd HH:mm:ss")
 
             # Hole die Datenbankverbindung
             db_uri = self.get_database_connection()
@@ -670,7 +658,7 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
             conn.autocommit = False
 
             # Kabeltyp-ID basierend auf dem ausgewählten Text abrufen
-            kabel_name = self.dlg.comboBox_kabel_typ.currentText()
+            kabel_name = self.ui.comboBox_kabel_typ.currentText()
             kabeltyp_id = self.get_kabeltyp_id(kabel_name)
 
             # Überprüfen, ob die Kabeltyp-ID abgerufen werden konnte
@@ -683,10 +671,10 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
             # Iteriere durch die Verlaufsliste und füge die Daten ein
             for index, verlauf_id in enumerate(self.verlauf_ids, start=1):
                 seg_id = index
-                kommentar = self.dlg.label_Kommentar.text()
-                bezeichnung_intern = self.dlg.label_Kommentar_2.text()
-                verlegestatus = self.dlg.comboBox_Verlegestatus.currentText()
-                gefoerdert = self.dlg.comboBox_Gefoerdert.currentText()
+                kommentar = self.ui.label_Kommentar.text()
+                bezeichnung_intern = self.ui.label_Kommentar_2.text()
+                verlegestatus = self.ui.comboBox_Verlegestatus.currentText()
+                gefoerdert = self.ui.comboBox_Gefoerdert.currentText()
 
                 # Leerrohr-Daten
                 layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr")[0]
@@ -754,7 +742,7 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
                     startpunkt_bezeichnung = "Unbekannt"  # Fallback, falls BEZEICHNUNG leer ist
 
                 # Setze das Label mit dem gewünschten Text
-                self.dlg.label_startpunkt_2.setText(f"Verteiler: {startpunkt_bezeichnung}")
+                self.ui.label_startpunkt_2.setText(f"Verteiler: {startpunkt_bezeichnung}")
                 self.startpunkt_id_2 = startpunkt_id_2
 
                 # Setzt Highlight für neuen Startknoten
@@ -788,7 +776,7 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
 
             if selected_features_2:
                 virtueller_knoten_id = selected_features_2[0].id()
-                self.dlg.label_virtueller_knoten.setText(f"Virtueller Knoten: {virtueller_knoten_id}")
+                self.ui.label_virtueller_knoten.setText(f"Virtueller Knoten: {virtueller_knoten_id}")
                 self.virtueller_knoten_id = virtueller_knoten_id
 
                 # Setzt Highlight für den virtuellen Knoten
@@ -821,7 +809,7 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
             selected_features_2 = layer.selectedFeatures()
             if selected_features_2:
                 hausanschluss_id = selected_features_2[0].id()
-                self.dlg.label_hausanschluss.setText(f"Hausanschluss: {hausanschluss_id}")
+                self.ui.label_hausanschluss.setText(f"Hausanschluss: {hausanschluss_id}")
                 self.endpunkt_id_2 = hausanschluss_id
 
                 # Setzt Highlight für den Hausanschlusspunkt
@@ -841,7 +829,7 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
     def aktion_verlauf_2(self):
         """Aktion für den Verlauf im zweiten Tab"""
         # Setze das Verlauf-Label und die Verlaufs-IDs für Tab 2 zurück
-        self.dlg.label_verlauf_2.clear()
+        self.ui.label_verlauf_2.clear()
         self.verlauf_ids_2.clear()
 
         # Entferne alle bisherigen Highlights für den Verlauf
@@ -868,7 +856,7 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
 
                 # Aktualisiere das Label mit den IDs
                 verlauf_text = "; ".join(map(str, self.verlauf_ids_2))  # Semikolon-getrennte IDs anzeigen
-                self.dlg.label_verlauf_2.setText(f"Verlauf: {verlauf_text}")
+                self.ui.label_verlauf_2.setText(f"Verlauf: {verlauf_text}")
 
                 # Highlight-Funktion für die neuen Geometrien
                 for feature in filtered_features:
@@ -893,9 +881,9 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
     def kabelverlauf_erstellen_2(self):
         """Funktion, um den Kabelverlauf in der Tabellenansicht anzuzeigen - Tab 2"""
         # Zusätzliche Attribute aus den Eingabefeldern holen
-        kommentar = self.dlg.label_Kommentar_3.text()  # Kommentar
-        verlegestatus = self.dlg.comboBox_Verlegestatus_2.currentText()  # Verlegestatus
-        gefoerdert = self.dlg.comboBox_Gefoerdert_2.currentText()  # Gefördert
+        kommentar = self.ui.label_Kommentar_3.text()  # Kommentar
+        verlegestatus = self.ui.comboBox_Verlegestatus_2.currentText()  # Verlegestatus
+        gefoerdert = self.ui.comboBox_Gefoerdert_2.currentText()  # Gefördert
 
         # Erstellt eine Liste mit Zeilen, die in die Tabelle eingefügt werden
         kabelverlauf_daten = []
@@ -954,13 +942,13 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
             model.appendRow(row)
 
         # Setze das Modell in die TableView
-        self.dlg.tableView_Vorschau_2.setModel(model)
+        self.ui.tableView_Vorschau_2.setModel(model)
 
     def pruefe_verbindung_2(self):
         """Prüft die Verbindung für den zweiten Tab (Hauseinführung)"""
         if not self.startpunkt_id_2 or not self.virtueller_knoten_id or not self.endpunkt_id_2 or not self.verlauf_ids_2:
-            self.dlg.label_Pruefung_2.setText("Unvollständige Daten.")
-            self.dlg.label_Pruefung_2.setStyleSheet("background-color: lightcoral;")
+            self.ui.label_Pruefung_2.setText("Unvollständige Daten.")
+            self.ui.label_Pruefung_2.setStyleSheet("background-color: lightcoral;")
             return
 
         korrekt = True
@@ -1014,13 +1002,13 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
                     break
 
         if korrekt:
-            self.dlg.label_Pruefung_2.setText("Verlauf ist korrekt verbunden. Daten können importiert werden")
-            self.dlg.label_Pruefung_2.setStyleSheet("background-color: lightgreen;")
-            self.dlg.pushButton_Import_2.setEnabled(True)
+            self.ui.label_Pruefung_2.setText("Verlauf ist korrekt verbunden. Daten können importiert werden")
+            self.ui.label_Pruefung_2.setStyleSheet("background-color: lightgreen;")
+            self.ui.pushButton_Import_2.setEnabled(True)
         else:
             QgsMessageLog.logMessage("Fehler: Verlauf ist nicht korrekt verbunden.", level=Qgis.Critical)
-            self.dlg.label_Pruefung_2.setText("Verlauf ist nicht verbunden. Bitte überprüfen Sie die Auswahl")
-            self.dlg.label_Pruefung_2.setStyleSheet("background-color: lightcoral;")
+            self.ui.label_Pruefung_2.setText("Verlauf ist nicht verbunden. Bitte überprüfen Sie die Auswahl")
+            self.ui.label_Pruefung_2.setStyleSheet("background-color: lightcoral;")
 
     def daten_importieren_2(self):
         """Importiert die geprüften Daten in die Datenbank für Tab 2 (Hauseinführung)."""
@@ -1039,7 +1027,7 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
             conn.autocommit = False
 
             # Kabeltyp-ID für Tab 2
-            kabel_name = self.dlg.comboBox_kabel_typ_2.currentText()
+            kabel_name = self.ui.comboBox_kabel_typ_2.currentText()
             kabeltyp_id = self.get_kabeltyp_id(kabel_name)
             if not kabeltyp_id:
                 raise Exception("Kabeltyp-ID konnte nicht abgerufen werden.")
@@ -1048,13 +1036,13 @@ class KabelVerlegungsTool(QDialog):  # Erbt jetzt von QDialog
             kabel_id = self.get_next_kabel_id()
 
             # DATUM_VERLEGT aus mDateTimeEdit_Hauseinfuehrung abrufen
-            datum_verlegt = self.dlg.mDateTimeEdit_Hauseinfuehrung.date().toString("yyyy-MM-dd")
+            datum_verlegt = self.ui.mDateTimeEdit_Hauseinfuehrung.date().toString("yyyy-MM-dd")
             
             # Zusätzliche Attribute aus den Eingabefeldern holen
-            kommentar = self.dlg.label_Kommentar_3.text()
+            kommentar = self.ui.label_Kommentar_3.text()
             bezeichnung_intern = f"EK {self.startpunkt_bezeichnung}-{self.hausanschluss_id}"
-            verlegestatus = self.dlg.comboBox_Verlegestatus_2.currentText()
-            gefoerdert = self.dlg.comboBox_Gefoerdert_2.currentText()
+            verlegestatus = self.ui.comboBox_Verlegestatus_2.currentText()
+            gefoerdert = self.ui.comboBox_Gefoerdert_2.currentText()
 
             for index, verlauf_id in enumerate(self.verlauf_ids_2):
                 seg_id = index + 1
