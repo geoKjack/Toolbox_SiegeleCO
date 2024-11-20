@@ -1,0 +1,118 @@
+Normaler Git-Workflow
+1. Projekt einrichten
+Initialisierung (einmalig):
+bash
+Code kopieren
+git init
+git remote add origin https://github.com/DEIN-BENUTZERNAME/REPOSITORY.git
+Erster Commit und Push:
+bash
+Code kopieren
+git add .
+git commit -m "Initial Commit"
+git push -u origin main
+2. Änderungen vornehmen
+Wenn du an deinem Projekt arbeitest:
+
+Dateien bearbeiten oder hinzufügen.
+
+Status prüfen:
+
+bash
+Code kopieren
+git status
+Du siehst alle geänderten oder neu hinzugefügten Dateien.
+
+Dateien zum Commit vorbereiten:
+
+bash
+Code kopieren
+git add DATEINAME  # Eine Datei
+git add .          # Alle geänderten Dateien
+Änderungen speichern (commit):
+
+bash
+Code kopieren
+git commit -m "Beschreibung der Änderungen"
+3. Änderungen hochladen (push)
+Lade deine Änderungen ins Remote-Repository (GitHub):
+bash
+Code kopieren
+git push
+4. Änderungen vom Remote abrufen (pull)
+Bevor du arbeitest, ziehe die neuesten Änderungen von GitHub:
+bash
+Code kopieren
+git pull
+5. Alte Stände wiederherstellen
+Wenn etwas schiefgeht, kannst du zu einem alten Stand zurückkehren. Hier sind zwei wichtige Szenarien:
+
+a) Nur alte Dateien anzeigen
+Zeige eine alte Version an, ohne den aktuellen Stand zu überschreiben:
+bash
+Code kopieren
+git checkout COMMIT-HASH DATEINAME
+Beispiel:
+bash
+Code kopieren
+git checkout 1234567 plugin.py
+b) Kompletten Stand wiederherstellen
+Prüfe die Historie:
+
+bash
+Code kopieren
+git log
+Du siehst die Liste der Commits (mit Nachrichten und Hashes).
+
+Zu einem alten Stand zurückgehen:
+
+bash
+Code kopieren
+git checkout COMMIT-HASH
+Hinweis: Das versetzt das Repository in diesen Stand, aber du kannst keine Änderungen pushen, ohne einen neuen Branch zu erstellen.
+
+Zurück zum aktuellen Stand (HEAD):
+
+bash
+Code kopieren
+git checkout main
+c) Commit rückgängig machen
+Letzten Commit rückgängig machen (ohne Dateien zu ändern):
+
+bash
+Code kopieren
+git reset --soft HEAD~1
+Letzten Commit rückgängig machen (Dateien auch zurücksetzen):
+
+bash
+Code kopieren
+git reset --hard HEAD~1
+Tipps für Fehlerfreiheit
+Kleine Commits machen:
+
+Speichere kleine Änderungen, um einfacher zurückgehen zu können.
+Branches verwenden:
+
+Arbeite an neuen Funktionen in separaten Branches:
+bash
+Code kopieren
+git checkout -b neuer-branch
+Zusammenführen (merge):
+bash
+Code kopieren
+git merge neuer-branch
+Regelmäßig pull/push:
+
+Ziehe regelmäßig Änderungen (git pull), bevor du git push ausführst.
+Backups prüfen:
+
+Kontrolliere vor einem großen Push, ob die Änderungen stimmen:
+bash
+Code kopieren
+git diff
+Zusammenfassung
+Workflow: Änderungen machen → git add → git commit → git push.
+Wiederherstellen:
+Ältere Commits prüfen: git log.
+Alte Dateien oder Stände wiederherstellen: git checkout.
+Tools wie Branches und kleine Commits helfen, den Überblick zu behalten.
