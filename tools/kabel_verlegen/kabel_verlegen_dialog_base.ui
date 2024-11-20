@@ -1,0 +1,894 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>KabelVerlegungsToolDialogBase</class>
+ <widget class="QDialog" name="KabelVerlegungsToolDialogBase">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>527</width>
+    <height>724</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Kabel Verlegen</string>
+  </property>
+  <widget class="QTabWidget" name="tabWidget">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>531</width>
+     <height>731</height>
+    </rect>
+   </property>
+   <property name="font">
+    <font>
+     <weight>50</weight>
+     <italic>false</italic>
+     <bold>false</bold>
+    </font>
+   </property>
+   <property name="autoFillBackground">
+    <bool>false</bool>
+   </property>
+   <property name="currentIndex">
+    <number>0</number>
+   </property>
+   <widget class="QWidget" name="tab">
+    <attribute name="title">
+     <string>Kabelverlauf Strecke</string>
+    </attribute>
+    <widget class="QGroupBox" name="groupBox_3">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>420</y>
+       <width>491</width>
+       <height>201</height>
+      </rect>
+     </property>
+     <property name="title">
+      <string>Vorschau Kabelfolge:</string>
+     </property>
+     <widget class="QTableView" name="tableView_Vorschau">
+      <property name="geometry">
+       <rect>
+        <x>1</x>
+        <y>0</y>
+        <width>490</width>
+        <height>131</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="pushButton_Vorschau">
+      <property name="geometry">
+       <rect>
+        <x>280</x>
+        <y>140</y>
+        <width>121</width>
+        <height>25</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Vorschau erstellen</string>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="pushButton_Datenpruefung">
+      <property name="geometry">
+       <rect>
+        <x>406</x>
+        <y>140</y>
+        <width>84</width>
+        <height>25</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Daten Prüfen</string>
+      </property>
+     </widget>
+     <widget class="QTextEdit" name="label_Pruefung">
+      <property name="geometry">
+       <rect>
+        <x>1</x>
+        <y>176</y>
+        <width>490</width>
+        <height>25</height>
+       </rect>
+      </property>
+     </widget>
+    </widget>
+    <widget class="QPushButton" name="pushButton_Import">
+     <property name="geometry">
+      <rect>
+       <x>333</x>
+       <y>654</y>
+       <width>84</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Import</string>
+     </property>
+    </widget>
+    <widget class="QDialogButtonBox" name="button_box">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>650</y>
+       <width>491</width>
+       <height>32</height>
+      </rect>
+     </property>
+     <property name="orientation">
+      <enum>Qt::Horizontal</enum>
+     </property>
+     <property name="standardButtons">
+      <set>QDialogButtonBox::Cancel|QDialogButtonBox::Reset</set>
+     </property>
+    </widget>
+    <widget class="QGroupBox" name="groupBox_2">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>230</y>
+       <width>491</width>
+       <height>181</height>
+      </rect>
+     </property>
+     <property name="title">
+      <string>Attribute Kabel</string>
+     </property>
+     <widget class="QLabel" name="label_11">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>31</y>
+        <width>101</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Kommentar:</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_12">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>63</y>
+        <width>111</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Verlegestatus:</string>
+      </property>
+     </widget>
+     <widget class="QComboBox" name="comboBox_Verlegestatus">
+      <property name="geometry">
+       <rect>
+        <x>130</x>
+        <y>59</y>
+        <width>181</width>
+        <height>22</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_13">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>94</y>
+        <width>111</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Gefördert:</string>
+      </property>
+     </widget>
+     <widget class="QComboBox" name="comboBox_Gefoerdert">
+      <property name="geometry">
+       <rect>
+        <x>130</x>
+        <y>90</y>
+        <width>181</width>
+        <height>22</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_14">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>125</y>
+        <width>121</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Berzeichung_intern:</string>
+      </property>
+     </widget>
+     <widget class="QLineEdit" name="label_Kommentar">
+      <property name="geometry">
+       <rect>
+        <x>130</x>
+        <y>30</y>
+        <width>351</width>
+        <height>22</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string/>
+      </property>
+      <property name="placeholderText">
+       <string>Kommentar hier eingeben...</string>
+      </property>
+     </widget>
+     <widget class="QLineEdit" name="label_Kommentar_2">
+      <property name="geometry">
+       <rect>
+        <x>130</x>
+        <y>120</y>
+        <width>351</width>
+        <height>22</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string/>
+      </property>
+      <property name="placeholderText">
+       <string>Bezeichnung hier eingeben...</string>
+      </property>
+     </widget>
+     <widget class="QgsDateTimeEdit" name="mDateTimeEdit_Strecke">
+      <property name="geometry">
+       <rect>
+        <x>130</x>
+        <y>150</y>
+        <width>181</width>
+        <height>22</height>
+       </rect>
+      </property>
+      <property name="displayFormat">
+       <string>dd.MM.yyyy</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_22">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>155</y>
+        <width>121</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Verlegt am:</string>
+      </property>
+     </widget>
+    </widget>
+    <widget class="QGroupBox" name="groupBox">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>90</y>
+       <width>491</width>
+       <height>131</height>
+      </rect>
+     </property>
+     <property name="title">
+      <string>Verlauf Kabel</string>
+     </property>
+     <widget class="QPushButton" name="pushButton_startpunkt">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>25</y>
+        <width>84</width>
+        <height>25</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Startknoten</string>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="pushButton_verlauf">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>58</y>
+        <width>84</width>
+        <height>25</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Kabelverlauf</string>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="pushButton_endpunkt">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>90</y>
+        <width>84</width>
+        <height>25</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Endknoten</string>
+      </property>
+     </widget>
+     <widget class="QTextEdit" name="label_startpunkt">
+      <property name="geometry">
+       <rect>
+        <x>230</x>
+        <y>25</y>
+        <width>251</width>
+        <height>25</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QTextEdit" name="label_verlauf">
+      <property name="geometry">
+       <rect>
+        <x>230</x>
+        <y>58</y>
+        <width>251</width>
+        <height>25</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QTextEdit" name="label_endpunkt">
+      <property name="geometry">
+       <rect>
+        <x>230</x>
+        <y>90</y>
+        <width>251</width>
+        <height>25</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_7">
+      <property name="geometry">
+       <rect>
+        <x>160</x>
+        <y>32</y>
+        <width>61</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Startpunkt:</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_8">
+      <property name="geometry">
+       <rect>
+        <x>175</x>
+        <y>65</y>
+        <width>41</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Verlauf:</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_9">
+      <property name="geometry">
+       <rect>
+        <x>164</x>
+        <y>95</y>
+        <width>51</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Endpunkt:</string>
+      </property>
+     </widget>
+    </widget>
+    <widget class="QGroupBox" name="groupBox_4">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>10</y>
+       <width>491</width>
+       <height>71</height>
+      </rect>
+     </property>
+     <property name="title">
+      <string>Kabelauswahl</string>
+     </property>
+     <widget class="QLabel" name="label">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>20</y>
+        <width>121</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Kabeltyp auswählen:</string>
+      </property>
+     </widget>
+     <widget class="QComboBox" name="comboBox_kabel_typ">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>40</y>
+        <width>181</width>
+        <height>22</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QTextEdit" name="label_gewaehltes_kabel">
+      <property name="geometry">
+       <rect>
+        <x>230</x>
+        <y>40</y>
+        <width>251</width>
+        <height>22</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_6">
+      <property name="geometry">
+       <rect>
+        <x>230</x>
+        <y>20</y>
+        <width>111</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>gewählter Kabeltyp:</string>
+      </property>
+     </widget>
+    </widget>
+    <zorder>groupBox_3</zorder>
+    <zorder>button_box</zorder>
+    <zorder>groupBox_2</zorder>
+    <zorder>groupBox</zorder>
+    <zorder>groupBox_4</zorder>
+    <zorder>pushButton_Import</zorder>
+   </widget>
+   <widget class="QWidget" name="tab_2">
+    <attribute name="title">
+     <string>Kabelverlauf Hauseinführung</string>
+    </attribute>
+    <widget class="QGroupBox" name="groupBox_5">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>10</y>
+       <width>491</width>
+       <height>71</height>
+      </rect>
+     </property>
+     <property name="title">
+      <string>Kabelauswahl</string>
+     </property>
+     <widget class="QLabel" name="label_2">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>20</y>
+        <width>191</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Kabel auswählen:</string>
+      </property>
+     </widget>
+     <widget class="QComboBox" name="comboBox_kabel_typ_2">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>40</y>
+        <width>181</width>
+        <height>22</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QTextEdit" name="label_gewaehltes_kabel_2">
+      <property name="geometry">
+       <rect>
+        <x>230</x>
+        <y>40</y>
+        <width>251</width>
+        <height>22</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_10">
+      <property name="geometry">
+       <rect>
+        <x>230</x>
+        <y>20</y>
+        <width>191</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>gewähltes Kabel:</string>
+      </property>
+     </widget>
+    </widget>
+    <widget class="QDialogButtonBox" name="button_box_2">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>650</y>
+       <width>491</width>
+       <height>32</height>
+      </rect>
+     </property>
+     <property name="orientation">
+      <enum>Qt::Horizontal</enum>
+     </property>
+     <property name="standardButtons">
+      <set>QDialogButtonBox::Cancel|QDialogButtonBox::Reset</set>
+     </property>
+    </widget>
+    <widget class="QGroupBox" name="groupBox_6">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>90</y>
+       <width>491</width>
+       <height>161</height>
+      </rect>
+     </property>
+     <property name="title">
+      <string>Verlauf Kabel</string>
+     </property>
+     <widget class="QPushButton" name="pushButton_startpunkt_2">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>25</y>
+        <width>91</width>
+        <height>25</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Verteilerkasten</string>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="pushButton_verlauf_2">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>58</y>
+        <width>91</width>
+        <height>25</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Kabelverlauf</string>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="pushButton_virtueller_knoten">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>90</y>
+        <width>91</width>
+        <height>25</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Virtueller Knoten</string>
+      </property>
+     </widget>
+     <widget class="QTextEdit" name="label_startpunkt_2">
+      <property name="geometry">
+       <rect>
+        <x>230</x>
+        <y>25</y>
+        <width>251</width>
+        <height>25</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QTextEdit" name="label_verlauf_2">
+      <property name="geometry">
+       <rect>
+        <x>230</x>
+        <y>58</y>
+        <width>251</width>
+        <height>25</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QTextEdit" name="label_virtueller_knoten">
+      <property name="geometry">
+       <rect>
+        <x>230</x>
+        <y>90</y>
+        <width>251</width>
+        <height>25</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_15">
+      <property name="geometry">
+       <rect>
+        <x>160</x>
+        <y>32</y>
+        <width>61</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Startpunkt:</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_16">
+      <property name="geometry">
+       <rect>
+        <x>175</x>
+        <y>65</y>
+        <width>41</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Verlauf:</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_17">
+      <property name="geometry">
+       <rect>
+        <x>124</x>
+        <y>95</y>
+        <width>91</width>
+        <height>20</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Virtueller Knoten:</string>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="pushButton_hausanschluss">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>124</y>
+        <width>91</width>
+        <height>25</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Hausanschluss</string>
+      </property>
+     </widget>
+     <widget class="QTextEdit" name="label_hausanschluss">
+      <property name="geometry">
+       <rect>
+        <x>230</x>
+        <y>124</y>
+        <width>251</width>
+        <height>25</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_21">
+      <property name="geometry">
+       <rect>
+        <x>164</x>
+        <y>129</y>
+        <width>51</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Endpunkt:</string>
+      </property>
+     </widget>
+    </widget>
+    <widget class="QGroupBox" name="groupBox_7">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>260</y>
+       <width>491</width>
+       <height>151</height>
+      </rect>
+     </property>
+     <property name="title">
+      <string>Attribute Kabel</string>
+     </property>
+     <widget class="QLabel" name="label_18">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>30</y>
+        <width>191</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Kommentar</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_19">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>61</y>
+        <width>191</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Verlegestatus</string>
+      </property>
+     </widget>
+     <widget class="QComboBox" name="comboBox_Verlegestatus_2">
+      <property name="geometry">
+       <rect>
+        <x>130</x>
+        <y>60</y>
+        <width>181</width>
+        <height>22</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_20">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>91</y>
+        <width>191</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Gefördert</string>
+      </property>
+     </widget>
+     <widget class="QComboBox" name="comboBox_Gefoerdert_2">
+      <property name="geometry">
+       <rect>
+        <x>130</x>
+        <y>90</y>
+        <width>181</width>
+        <height>22</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QLineEdit" name="label_Kommentar_3">
+      <property name="geometry">
+       <rect>
+        <x>130</x>
+        <y>29</y>
+        <width>351</width>
+        <height>22</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string/>
+      </property>
+      <property name="placeholderText">
+       <string>Kommentar hier eingeben...</string>
+      </property>
+     </widget>
+     <widget class="QgsDateTimeEdit" name="mDateTimeEdit_Hauseinfuehrung">
+      <property name="geometry">
+       <rect>
+        <x>130</x>
+        <y>119</y>
+        <width>181</width>
+        <height>22</height>
+       </rect>
+      </property>
+      <property name="displayFormat">
+       <string>dd.MM.yyyy</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_40">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>120</y>
+        <width>121</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Verlegt am:</string>
+      </property>
+     </widget>
+    </widget>
+    <widget class="QGroupBox" name="groupBox_8">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>420</y>
+       <width>491</width>
+       <height>201</height>
+      </rect>
+     </property>
+     <property name="title">
+      <string>Vorschau Kabelfolge:</string>
+     </property>
+     <widget class="QTableView" name="tableView_Vorschau_2">
+      <property name="geometry">
+       <rect>
+        <x>0</x>
+        <y>0</y>
+        <width>491</width>
+        <height>131</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="pushButton_Vorschau_2">
+      <property name="geometry">
+       <rect>
+        <x>280</x>
+        <y>140</y>
+        <width>121</width>
+        <height>25</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Vorschau erstellen</string>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="pushButton_Datenpruefung_2">
+      <property name="geometry">
+       <rect>
+        <x>406</x>
+        <y>140</y>
+        <width>84</width>
+        <height>25</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Daten Prüfen</string>
+      </property>
+     </widget>
+     <widget class="QTextEdit" name="label_Pruefung_2">
+      <property name="geometry">
+       <rect>
+        <x>0</x>
+        <y>170</y>
+        <width>491</width>
+        <height>31</height>
+       </rect>
+      </property>
+     </widget>
+    </widget>
+    <widget class="QPushButton" name="pushButton_Import_2">
+     <property name="geometry">
+      <rect>
+       <x>335</x>
+       <y>653</y>
+       <width>84</width>
+       <height>25</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Import</string>
+     </property>
+    </widget>
+   </widget>
+  </widget>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>QgsDateTimeEdit</class>
+   <extends>QDateTimeEdit</extends>
+   <header>qgsdatetimeedit.h</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

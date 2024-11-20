@@ -1,0 +1,445 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>LeerrohrVerlegungsToolDialogBase</class>
+ <widget class="QDialog" name="LeerrohrVerlegungsToolDialogBase">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>525</width>
+    <height>720</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Leerrohr Verlegen</string>
+  </property>
+  <widget class="QTabWidget" name="tabWidget">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>531</width>
+     <height>731</height>
+    </rect>
+   </property>
+   <property name="font">
+    <font>
+     <weight>50</weight>
+     <italic>false</italic>
+     <bold>false</bold>
+    </font>
+   </property>
+   <property name="autoFillBackground">
+    <bool>false</bool>
+   </property>
+   <property name="currentIndex">
+    <number>0</number>
+   </property>
+   <widget class="QWidget" name="tab">
+    <attribute name="title">
+     <string>Leerrohr Verlauf</string>
+    </attribute>
+    <widget class="QGroupBox" name="groupBox_3">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>530</y>
+       <width>491</width>
+       <height>91</height>
+      </rect>
+     </property>
+     <property name="title">
+      <string>Leerohr Prüfen:</string>
+     </property>
+     <widget class="QPushButton" name="pushButton_Datenpruefung">
+      <property name="geometry">
+       <rect>
+        <x>406</x>
+        <y>30</y>
+        <width>84</width>
+        <height>25</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Daten Prüfen</string>
+      </property>
+     </widget>
+     <widget class="QTextEdit" name="label_Pruefung">
+      <property name="geometry">
+       <rect>
+        <x>1</x>
+        <y>66</y>
+        <width>490</width>
+        <height>25</height>
+       </rect>
+      </property>
+     </widget>
+    </widget>
+    <widget class="QPushButton" name="pushButton_Import">
+     <property name="geometry">
+      <rect>
+       <x>333</x>
+       <y>654</y>
+       <width>84</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Import</string>
+     </property>
+    </widget>
+    <widget class="QDialogButtonBox" name="button_box">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>650</y>
+       <width>491</width>
+       <height>32</height>
+      </rect>
+     </property>
+     <property name="orientation">
+      <enum>Qt::Horizontal</enum>
+     </property>
+     <property name="standardButtons">
+      <set>QDialogButtonBox::Cancel|QDialogButtonBox::Reset</set>
+     </property>
+    </widget>
+    <widget class="QGroupBox" name="groupBox_2">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>230</y>
+       <width>491</width>
+       <height>291</height>
+      </rect>
+     </property>
+     <property name="title">
+      <string>Attribute Leerrohr</string>
+     </property>
+     <widget class="QLabel" name="label_11">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>94</y>
+        <width>101</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Kommentar:</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_12">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>30</y>
+        <width>111</width>
+        <height>20</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Verbundnummer:</string>
+      </property>
+     </widget>
+     <widget class="QComboBox" name="comboBox_Verbundnummer">
+      <property name="geometry">
+       <rect>
+        <x>130</x>
+        <y>29</y>
+        <width>181</width>
+        <height>22</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_13">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>64</y>
+        <width>111</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Gefördert:</string>
+      </property>
+     </widget>
+     <widget class="QComboBox" name="comboBox_Gefoerdert">
+      <property name="geometry">
+       <rect>
+        <x>130</x>
+        <y>60</y>
+        <width>181</width>
+        <height>22</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_14">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>125</y>
+        <width>121</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Beschreibung:</string>
+      </property>
+     </widget>
+     <widget class="QLineEdit" name="label_Kommentar">
+      <property name="geometry">
+       <rect>
+        <x>130</x>
+        <y>90</y>
+        <width>351</width>
+        <height>22</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string/>
+      </property>
+      <property name="placeholderText">
+       <string>Kommentar hier eingeben...</string>
+      </property>
+     </widget>
+     <widget class="QLineEdit" name="label_Kommentar_2">
+      <property name="geometry">
+       <rect>
+        <x>130</x>
+        <y>120</y>
+        <width>351</width>
+        <height>22</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string/>
+      </property>
+      <property name="placeholderText">
+       <string>Beschreibung hier eingeben...</string>
+      </property>
+     </widget>
+     <widget class="QgsDateTimeEdit" name="mDateTimeEdit_Strecke">
+      <property name="geometry">
+       <rect>
+        <x>130</x>
+        <y>150</y>
+        <width>181</width>
+        <height>22</height>
+       </rect>
+      </property>
+      <property name="displayFormat">
+       <string>dd.MM.yyyy</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_22">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>155</y>
+        <width>121</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Verlegt am:</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_15">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>184</y>
+        <width>111</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Subduct:</string>
+      </property>
+     </widget>
+     <widget class="QComboBox" name="comboBox_Subduct">
+      <property name="geometry">
+       <rect>
+        <x>130</x>
+        <y>180</y>
+        <width>181</width>
+        <height>22</height>
+       </rect>
+      </property>
+     </widget>
+    </widget>
+    <widget class="QGroupBox" name="groupBox">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>150</y>
+       <width>491</width>
+       <height>71</height>
+      </rect>
+     </property>
+     <property name="title">
+      <string>Verlauf Leerrohr</string>
+     </property>
+     <widget class="QPushButton" name="pushButton_verlauf">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>24</y>
+        <width>84</width>
+        <height>25</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Leerrohrverlauf</string>
+      </property>
+     </widget>
+     <widget class="QTextEdit" name="label_verlauf">
+      <property name="geometry">
+       <rect>
+        <x>230</x>
+        <y>24</y>
+        <width>251</width>
+        <height>25</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_8">
+      <property name="geometry">
+       <rect>
+        <x>129</x>
+        <y>28</y>
+        <width>91</width>
+        <height>20</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>gewählte Trassen:</string>
+      </property>
+     </widget>
+    </widget>
+    <widget class="QGroupBox" name="groupBox_4">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>10</y>
+       <width>491</width>
+       <height>131</height>
+      </rect>
+     </property>
+     <property name="title">
+      <string>Auswahl Leerrohr</string>
+     </property>
+     <widget class="QLabel" name="label">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>20</y>
+        <width>121</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Leerrohrtyp auswählen:</string>
+      </property>
+     </widget>
+     <widget class="QComboBox" name="comboBox_leerrohr_typ">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>40</y>
+        <width>181</width>
+        <height>22</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QTextEdit" name="label_gewaehltes_leerrohr">
+      <property name="geometry">
+       <rect>
+        <x>230</x>
+        <y>40</y>
+        <width>251</width>
+        <height>22</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_6">
+      <property name="geometry">
+       <rect>
+        <x>230</x>
+        <y>20</y>
+        <width>111</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>gewählter Leerrohrtyp:</string>
+      </property>
+     </widget>
+     <widget class="QComboBox" name="comboBox_leerrohr_typ_2">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>90</y>
+        <width>181</width>
+        <height>22</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QTextEdit" name="label_gewaehltes_leerrohr_2">
+      <property name="geometry">
+       <rect>
+        <x>230</x>
+        <y>90</y>
+        <width>251</width>
+        <height>22</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_10">
+      <property name="geometry">
+       <rect>
+        <x>230</x>
+        <y>70</y>
+        <width>141</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>gewählter Leerrohrsubtyp:</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_2">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>70</y>
+        <width>161</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Leerrohrsubtyp auswählen:</string>
+      </property>
+     </widget>
+    </widget>
+    <zorder>groupBox_3</zorder>
+    <zorder>button_box</zorder>
+    <zorder>groupBox_2</zorder>
+    <zorder>groupBox</zorder>
+    <zorder>groupBox_4</zorder>
+    <zorder>pushButton_Import</zorder>
+   </widget>
+  </widget>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>QgsDateTimeEdit</class>
+   <extends>QDateTimeEdit</extends>
+   <header>qgsdatetimeedit.h</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

@@ -1,0 +1,8 @@
+[general]
+name=TollBoxSiegeleCo
+qgisMinimumVersion=3.0
+version=1.0
+author=Siegele Connect
+email=marcel.kelterer@gmail.com
+description=Toolbox für verschiedene Werkzeuge
+icon=icons/icon_Toolbox.svg
