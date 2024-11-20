@@ -72,7 +72,7 @@ class LeerrohrVerlegenTool(QDialog):
 
         if not query.exec_():
             self.ui.label_Pruefung.setText("Fehler beim Abrufen der Leerrohrtypen")
-            self.ui.label_Pruefung.setStyleSheet("background-color: red; color: white;")
+            self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
             return
 
         self.ui.comboBox_leerrohr_typ.clear()  # Vor dem Befüllen sicherstellen, dass die ComboBox leer ist
@@ -92,7 +92,7 @@ class LeerrohrVerlegenTool(QDialog):
 
         if not query.exec_():
             self.ui.label_Pruefung.setText("Fehler beim Abrufen der Leerrohr-Subtypen")
-            self.ui.label_Pruefung.setStyleSheet("background-color: red; color: white;")
+            self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
             return
 
         self.ui.comboBox_leerrohr_typ_2.clear()  # Vor dem Befüllen sicherstellen, dass die ComboBox leer ist
@@ -159,7 +159,7 @@ class LeerrohrVerlegenTool(QDialog):
         layer = QgsProject.instance().mapLayersByName("LWL_Trasse")
         if not layer:
             self.ui.label_Pruefung.setText("Layer 'LWL_Trasse' nicht gefunden")
-            self.ui.label_Pruefung.setStyleSheet("background-color: red; color: white;")
+            self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
             return
         layer = layer[0]
 
@@ -209,17 +209,17 @@ class LeerrohrVerlegenTool(QDialog):
         # Ergebnis der Prüfung
         if fehler:
             self.ui.label_Pruefung.setText("; ".join(fehler))
-            self.ui.label_Pruefung.setStyleSheet("background-color: red; color: white;")
+            self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
             self.ui.pushButton_Import.setEnabled(False)
         else:
             self.ui.label_Pruefung.setText("Prüfung erfolgreich. Import möglich.")
-            self.ui.label_Pruefung.setStyleSheet("background-color: green; color: white;")
+            self.ui.label_Pruefung.setStyleSheet("background-color: lightgreen;")
             self.ui.pushButton_Import.setEnabled(True)
 
     def importiere_daten(self):
         """Importiert die Daten (noch nicht implementiert)."""
         self.ui.label_Pruefung.setText("Daten erfolgreich importiert!")
-        self.ui.label_Pruefung.setStyleSheet("background-color: green; color: white;")
+        self.ui.label_Pruefung.setStyleSheet("background-color: lightgreen;")
 
     def clear_trasse_selection(self):
         """Setzt alle Felder und Highlights zurück."""
