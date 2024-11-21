@@ -3,6 +3,8 @@ from qgis.PyQt.QtGui import QIcon
 from qgis.core import Qgis
 from . import resources_rc
 from .tools.leerrohr_verlegen.leerrohr_verlegen import LeerrohrVerlegenTool
+from .tools.hauseinfuehrung_verlegen.hauseinfuehrung_verlegen import HauseinfuehrungsVerlegungsTool
+
 
 import sys
 sys.path.append(r'C:\Users\marce\AppData\Roaming\QGIS\QGIS3\profiles\default\python\plugins\ToolBox_SiegeleCo')
@@ -37,7 +39,7 @@ class TollBoxSiegeleCoPlugin:
         self.add_toolbar_action("Kabel Verlegen Tool", self.run_kabel_verlegen, ":/plugins/ToolBox_SiegeleCo/icons/icon_kabel_verlegen.png")
         self.add_toolbar_action("Trasse Verwalten Tool", self.run_trasse_verwalten, ":/plugins/ToolBox_SiegeleCo/icons/icon_trasse_verwalten_tool.png")
         self.add_toolbar_action("Leerrohr Verwalten Tool", self.run_leerrohr_erfassen, ":/plugins/ToolBox_SiegeleCo/icons/icon_leerrohr_verwalten_tool.png")
-        self.add_toolbar_action("Hausanschluss Tool", self.run_other_tool, ":/plugins/ToolBox_SiegeleCo/icons/icon_hausanschluesse.png")
+        self.add_toolbar_action("Hausanschluss Tool", self.run_hausanschluss_verlegen, ":/plugins/ToolBox_SiegeleCo/icons/icon_hausanschluesse.png")
 
     def add_toolbar_action(self, name, function, icon_path):
         # Hilfsfunktion zum Erstellen und Hinzufügen einer Schaltfläche zur Toolbar
@@ -66,8 +68,10 @@ class TollBoxSiegeleCoPlugin:
         self.test_dialog = LeerrohrVerlegenTool(self.iface)  # Übergibt iface korrekt
         self.test_dialog.show()  # Zeigt den Dialog an
 
-    def run_other_tool(self):
+    def run_hausanschluss_verlegen(self):
         self.iface.messageBar().pushMessage("Hausanschluss Tool aktiviert", level=Qgis.Info)
+        self.test_dialog = HauseinfuehrungsVerlegungsTool(self.iface)  # Übergibt iface korrekt
+        self.test_dialog.show()  # Zeigt den Dialog an
 
     def unload(self):
         # Entferne die Symbolleiste bei Deaktivierung des Plugins

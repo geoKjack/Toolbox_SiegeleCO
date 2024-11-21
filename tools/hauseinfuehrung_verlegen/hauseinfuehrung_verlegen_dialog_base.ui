@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>525</width>
-    <height>720</height>
+    <width>523</width>
+    <height>716</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -120,7 +120,7 @@
       <property name="geometry">
        <rect>
         <x>10</x>
-        <y>94</y>
+        <y>64</y>
         <width>101</width>
         <height>16</height>
        </rect>
@@ -129,34 +129,11 @@
        <string>Kommentar:</string>
       </property>
      </widget>
-     <widget class="QLabel" name="label_12">
-      <property name="geometry">
-       <rect>
-        <x>10</x>
-        <y>30</y>
-        <width>111</width>
-        <height>20</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Verbundnummer:</string>
-      </property>
-     </widget>
-     <widget class="QComboBox" name="comboBox_Verbundnummer">
-      <property name="geometry">
-       <rect>
-        <x>130</x>
-        <y>29</y>
-        <width>181</width>
-        <height>22</height>
-       </rect>
-      </property>
-     </widget>
      <widget class="QLabel" name="label_13">
       <property name="geometry">
        <rect>
         <x>10</x>
-        <y>64</y>
+        <y>34</y>
         <width>111</width>
         <height>16</height>
        </rect>
@@ -169,7 +146,7 @@
       <property name="geometry">
        <rect>
         <x>130</x>
-        <y>60</y>
+        <y>30</y>
         <width>181</width>
         <height>22</height>
        </rect>
@@ -179,7 +156,7 @@
       <property name="geometry">
        <rect>
         <x>10</x>
-        <y>125</y>
+        <y>95</y>
         <width>121</width>
         <height>16</height>
        </rect>
@@ -192,7 +169,7 @@
       <property name="geometry">
        <rect>
         <x>130</x>
-        <y>90</y>
+        <y>60</y>
         <width>351</width>
         <height>22</height>
        </rect>
@@ -208,7 +185,7 @@
       <property name="geometry">
        <rect>
         <x>130</x>
-        <y>120</y>
+        <y>90</y>
         <width>351</width>
         <height>22</height>
        </rect>
@@ -224,7 +201,7 @@
       <property name="geometry">
        <rect>
         <x>130</x>
-        <y>150</y>
+        <y>120</y>
         <width>181</width>
         <height>22</height>
        </rect>
@@ -237,7 +214,7 @@
       <property name="geometry">
        <rect>
         <x>10</x>
-        <y>155</y>
+        <y>125</y>
         <width>121</width>
         <height>16</height>
        </rect>
@@ -317,7 +294,7 @@
         <x>230</x>
         <y>23</y>
         <width>251</width>
-        <height>25</height>
+        <height>22</height>
        </rect>
       </property>
      </widget>
@@ -347,16 +324,6 @@
        </rect>
       </property>
      </widget>
-     <widget class="QComboBox" name="comboBox_codierung">
-      <property name="geometry">
-       <rect>
-        <x>230</x>
-        <y>80</y>
-        <width>181</width>
-        <height>22</height>
-       </rect>
-      </property>
-     </widget>
      <widget class="QLabel" name="label_16">
       <property name="geometry">
        <rect>
@@ -367,19 +334,19 @@
        </rect>
       </property>
       <property name="text">
-       <string>Codierung:</string>
+       <string>Farbschema:</string>
       </property>
       <property name="alignment">
        <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
       </property>
      </widget>
-     <widget class="QTextEdit" name="label_verlauf">
+     <widget class="QTextEdit" name="label_subtyp">
       <property name="geometry">
        <rect>
         <x>230</x>
-        <y>50</y>
+        <y>51</y>
         <width>251</width>
-        <height>25</height>
+        <height>22</height>
        </rect>
       </property>
      </widget>
@@ -397,6 +364,16 @@
       </property>
       <property name="alignment">
        <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+      </property>
+     </widget>
+     <widget class="QTextEdit" name="label_farbschema">
+      <property name="geometry">
+       <rect>
+        <x>230</x>
+        <y>80</y>
+        <width>251</width>
+        <height>22</height>
+       </rect>
       </property>
      </widget>
     </widget>
