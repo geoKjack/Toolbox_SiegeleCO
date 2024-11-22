@@ -318,9 +318,9 @@
       <property name="geometry">
        <rect>
         <x>0</x>
-        <y>120</y>
+        <y>171</y>
         <width>491</width>
-        <height>81</height>
+        <height>30</height>
        </rect>
       </property>
      </widget>
@@ -374,6 +374,19 @@
         <width>251</width>
         <height>22</height>
        </rect>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_12">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>150</y>
+        <width>321</width>
+        <height>20</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>bitte wählen Sie die korrekte Rohrnummer bzw. Farbe:</string>
       </property>
      </widget>
     </widget>
