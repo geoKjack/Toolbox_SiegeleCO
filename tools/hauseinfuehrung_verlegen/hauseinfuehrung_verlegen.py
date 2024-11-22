@@ -4,14 +4,14 @@ HauseinfuehrungsVerlegungsTool
 Verlegt Hauseinführungen durch Auswahl von Parent Leerrohr, Verlauf und Endpunkten.
 """
 
-from qgis.PyQt.QtCore import Qt, QRectF, QObject, pyqtSignal
-from qgis.PyQt.QtWidgets import QDialog, QGraphicsScene, QGraphicsSimpleTextItem, QGraphicsRectItem
+from PyQt5.QtCore import Qt, QRectF, QObject, pyqtSignal
+from PyQt5.QtWidgets import QDialog, QGraphicsScene, QGraphicsSimpleTextItem, QGraphicsRectItem, QGraphicsPolygonItem
 from qgis.core import QgsProject, Qgis, QgsFeatureRequest, QgsDataSourceUri
 from qgis.gui import QgsHighlight
-from PyQt5.QtGui import QColor, QBrush, QFont
+from PyQt5.QtGui import QColor, QBrush, QFont, QPolygonF
 import psycopg2
 from .hauseinfuehrung_verlegen_dialog import Ui_HauseinfuehrungsVerlegungsToolDialogBase
-from PyQt5.QtCore import QObject, pyqtSignal
+from PyQt5.QtCore import Qt, QRectF, QObject, pyqtSignal, QPointF
 
 class ClickableRect(QGraphicsRectItem):
     def __init__(self, x, y, width, height, rohrnummer, callback, parent=None):
@@ -111,12 +111,15 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.scene = QGraphicsScene()
         self.ui.graphicsView_Farben_Rohre.setScene(self.scene)
 
-        # Daten laden und sortieren
-        rohre = sorted(self.lade_farben_und_rohrnummern(subtyp_id, farbschema), key=lambda x: x[0])
+        # Daten laden
+        rohre = self.lade_farben_und_rohrnummern(subtyp_id, farbschema)
 
         if not rohre:
             self.iface.messageBar().pushMessage("Info", "Keine Rohre zum Zeichnen gefunden.", level=Qgis.Warning)
             return
+
+        # Sortiere die Rohrdaten nach Rohrnummer (erste Spalte in der Liste)
+        rohre.sort(key=lambda x: x[0])  # Sortiere nach der Rohrnummer
 
         x_offset = 10
         y_offset = 10
@@ -131,33 +134,44 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
 
             # Klickbares Rechteck erstellen
             clickable_rect = ClickableRect(x_pos, y_offset, rect_width, rect_height, rohrnummer, self.handle_rect_click)
-            clickable_rect.setBrush(QBrush(QColor(farbteile[0])) if len(farbteile) == 1 else None)
             self.scene.addItem(clickable_rect)
 
-            # Zwei Farben: obere und untere Hälfte
-            if len(farbteile) == 2:
-                clickable_rect.setBrush(None)
-                rect_upper = QGraphicsRectItem(x_pos, y_offset, rect_width, rect_height / 2)
-                rect_upper.setBrush(QBrush(QColor(farbteile[0])))
-                self.scene.addItem(rect_upper)
+            # Einfarbige Rechtecke
+            if len(farbteile) == 1:
+                clickable_rect.setBrush(QBrush(QColor(farbteile[0])))
+            elif len(farbteile) == 2:
+                # Zweifarbige Rechtecke: Diagonale Teilung
+                polygon1 = QGraphicsPolygonItem()
+                polygon1.setPolygon(QPolygonF([
+                    QPointF(x_pos, y_offset),  # Oben links
+                    QPointF(x_pos + rect_width, y_offset),  # Oben rechts
+                    QPointF(x_pos, y_offset + rect_height)  # Unten links
+                ]))
+                polygon1.setBrush(QBrush(QColor(farbteile[0])))
+                self.scene.addItem(polygon1)
 
-                rect_lower = QGraphicsRectItem(x_pos, y_offset + rect_height / 2, rect_width, rect_height / 2)
-                rect_lower.setBrush(QBrush(QColor(farbteile[1])))
-                self.scene.addItem(rect_lower)
+                polygon2 = QGraphicsPolygonItem()
+                polygon2.setPolygon(QPolygonF([
+                    QPointF(x_pos + rect_width, y_offset),  # Oben rechts
+                    QPointF(x_pos + rect_width, y_offset + rect_height),  # Unten rechts
+                    QPointF(x_pos, y_offset + rect_height)  # Unten links
+                ]))
+                polygon2.setBrush(QBrush(QColor(farbteile[1])))
+                self.scene.addItem(polygon2)
 
-            # HALO und Text hinzufügen
-            halo_item = QGraphicsSimpleTextItem(str(rohrnummer))
-            halo_item.setFont(QFont("Arial", font_size))
-            halo_item.setBrush(QBrush(Qt.white))  # HALO in Weiß
-            halo_item.setPos(x_pos + rect_width / 4, y_offset + rect_height / 4)
-            halo_item.setZValue(1)  # Hintergrundebene für HALO
-            self.scene.addItem(halo_item)
+            # Halo-Effekt für Text (Rohrnummer)
+            halo_text = QGraphicsSimpleTextItem(str(rohrnummer))
+            halo_text.setBrush(QBrush(Qt.white))
+            halo_text.setFont(QFont("Arial", font_size, QFont.Bold))
+            halo_text.setZValue(1)  # Hintergrundebene
+            halo_text.setPos(x_pos + rect_width / 4 - 1, y_offset + rect_height / 4 - 1)  # Leichte Verschiebung für den Halo
+            self.scene.addItem(halo_text)
 
             text_item = QGraphicsSimpleTextItem(str(rohrnummer))
-            text_item.setFont(QFont("Arial", font_size))
-            text_item.setBrush(QBrush(Qt.black))  # Text in Schwarz
+            text_item.setBrush(QBrush(Qt.black))
+            text_item.setFont(QFont("Arial", font_size, QFont.Bold))
+            text_item.setZValue(2)  # Vordere Ebene
             text_item.setPos(x_pos + rect_width / 4, y_offset + rect_height / 4)
-            text_item.setZValue(2)  # Vordergrundebene für Text
             self.scene.addItem(text_item)
 
         self.scene.update()
