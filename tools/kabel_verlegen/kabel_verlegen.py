@@ -198,17 +198,20 @@ class KabelVerlegungsTool(QDialog):
         self.ui.label_verlauf.clear()     # Verlauf zurücksetzen
         self.ui.tableView_Vorschau.setModel(None)  # Vorschau-Tabelle zurücksetzen
 
-        # Vorübergehend den Eventhandler trennen, um unerwünschte Updates zu vermeiden
-        self.ui.comboBox_kabel_typ.blockSignals(True)
-        self.ui.comboBox_kabel_typ.setCurrentIndex(-1)  # ComboBox auf keinen Eintrag setzen
-        self.ui.comboBox_kabel_typ.blockSignals(False)
+        # Dropdowns zurücksetzen und neu befüllen
+        self.ui.comboBox_kabel_typ.clear()
+        self.populate_kabel_typen()  # Neu befüllen
         
-        self.ui.comboBox_Verlegestatus.setCurrentIndex(0)  # Verlegestatus zurücksetzen
-        self.ui.comboBox_Gefoerdert.setCurrentIndex(0)  # Gefördert-Status zurücksetzen
-        self.ui.label_Kommentar.clear()  # Kommentar zurücksetzen
-        self.ui.label_Kommentar_2.clear()  # Kommentar zurücksetzen
+        self.ui.comboBox_Verlegestatus.clear()
+        self.ui.comboBox_Verlegestatus.addItems(["Geplant", "Eingeblasen - inaktiv", "Eingeblasen - aktiv", "Defekt"])
+        
+        self.ui.comboBox_Gefoerdert.clear()
+        self.ui.comboBox_Gefoerdert.addItems(["Ja", "Nein"])
+
+        # Kommentare und Labels zurücksetzen
+        self.ui.label_Kommentar.clear()
+        self.ui.label_Kommentar_2.clear()
         self.ui.label_Pruefung.clear()  # Prüfungsergebnis zurücksetzen
-        # Hintergrundfarbe von label_Pruefung auf Standardfarbe zurücksetzen
         self.ui.label_Pruefung.setStyleSheet("")  # Entfernt alle Styles und setzt den Standardhintergrund
 
         self.ui.label_gewaehltes_kabel.clear()  # Label für gewähltes Kabel zurücksetzen
@@ -218,6 +221,7 @@ class KabelVerlegungsTool(QDialog):
 
         # Import-Button deaktivieren
         self.ui.pushButton_Import.setEnabled(False)
+
         
     def reset_form_2(self):
         """Setzt das gesamte Formular des zweiten Tabs zurück und entfernt alle Highlights"""
@@ -660,7 +664,6 @@ class KabelVerlegungsTool(QDialog):
             db_uri = self.get_database_connection()
             uri = QgsDataSourceUri(db_uri)
 
-            # Verbinde zur PostgreSQL-Datenbank
             conn = psycopg2.connect(
                 dbname=uri.database(),
                 user=uri.username(),
@@ -669,69 +672,84 @@ class KabelVerlegungsTool(QDialog):
                 port=uri.port()
             )
             cur = conn.cursor()
-
-            # Starte die Datenbank-Transaktion
             conn.autocommit = False
 
             # Kabeltyp-ID basierend auf dem ausgewählten Text abrufen
             kabel_name = self.ui.comboBox_kabel_typ.currentText()
             kabeltyp_id = self.get_kabeltyp_id(kabel_name)
 
-            # Überprüfen, ob die Kabeltyp-ID abgerufen werden konnte
             if not kabeltyp_id:
                 raise Exception("Kabeltyp-ID konnte nicht abgerufen werden.")
 
             # Bestimme die nächste verfügbare Kabel-ID
             kabel_id = self.get_next_kabel_id()
 
-            # Iteriere durch die Verlaufsliste und füge die Daten ein
-            for index, verlauf_id in enumerate(self.verlauf_ids, start=1):
-                seg_id = index
-                kommentar = self.ui.label_Kommentar.text()
-                bezeichnung_intern = self.ui.label_Kommentar_2.text()
-                verlegestatus = self.ui.comboBox_Verlegestatus.currentText()
-                gefoerdert = self.ui.comboBox_Gefoerdert.currentText()
+            # 1. Start- und Endknoten bestimmen
+            start_knoten = self.startpunkt_id
+            end_knoten = self.endpunkt_id
+            if not start_knoten or not end_knoten:
+                raise Exception("Start- oder Endknoten nicht definiert.")
 
-                # Leerrohr-Daten
-                layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr")[0]
+            # 2. Kommentar, Verlegestatus und Gefördert-Status abrufen
+            kommentar = self.ui.label_Kommentar.text()
+            kommentar_2 = self.ui.label_Kommentar_2.text()  # Wert von label_Kommentar_2 abrufen
+            verlegestatus = self.ui.comboBox_Verlegestatus.currentText()
+            gefoerdert = self.ui.comboBox_Gefoerdert.currentText()
+
+            # 3. IDs der Trassen und Leerrohre sammeln
+            layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr")[0]
+            trassen_ids = []
+            leerrohr_ids = []
+
+            for verlauf_id in self.verlauf_ids:
                 feature = next(layer.getFeatures(QgsFeatureRequest().setFilterExpression(f'"id" = {verlauf_id}')))
-                von_knoten = feature["VONKNOTEN"]
-                nach_knoten = feature["NACHKNOTEN"]
-                trassen_id = feature["ID_Trasse"]
+                if feature["ID_TRASSE"]:
+                    trassen_ids.extend(feature["ID_TRASSE"])  # IDs der Trassen
+                leerrohr_ids.append(verlauf_id)  # IDs der Leerrohre
 
-                # SQL-Abfrage mit dem Datum hinzufügen
-                insert_query = """
-                INSERT INTO "lwl"."LWL_Kabel_Verlegt"
-                ("KABEL_ID", "KABELTYP", "ID_LEERROHR", "ID_TRASSE", "VONKNOTEN", "NACHKNOTEN", "SEGMENT_ID", 
-                 "KOMMENTAR", "BEZEICHNUNG_INTERN", "VERLEGESTATUS", "STARTKNOTEN", "ENDKNOTEN", "GEFOERDERT", 
-                 "TYP", "DATUM_VERLEGT")
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """
+            # Entferne doppelte Trassen-IDs
+            trassen_ids = list(set(trassen_ids))
 
-                # Daten einsetzen
-                cur.execute(insert_query, (
-                    kabel_id, kabeltyp_id, verlauf_id, trassen_id, von_knoten, nach_knoten, seg_id, kommentar,
-                    bezeichnung_intern, verlegestatus, 
-                    self.startpunkt_id if index == 1 else None,
-                    self.endpunkt_id if index == len(self.verlauf_ids) else None,
-                    gefoerdert, "Streckenkabel", datum_verlegt
-                ))
+            # 4. Daten importieren
+            insert_query = """
+            INSERT INTO "lwl"."LWL_Kabel_Verlegt"
+            ("KABEL_ID", "KABELTYP", "ID_LEERROHR", "ID_TRASSE", "VONKNOTEN", "NACHKNOTEN", "SEGMENT_ID",
+             "KOMMENTAR", "BEZEICHNUNG_INTERN", "VERLEGESTATUS", "STARTKNOTEN", "ENDKNOTEN", "GEFOERDERT", 
+             "TYP", "DATUM_VERLEGT")
+            VALUES (%s, %s, CAST(%s AS bigint[]), CAST(%s AS bigint[]), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+
+            cur.execute(insert_query, (
+                kabel_id,
+                kabeltyp_id,
+                leerrohr_ids,  # Leerrohr-IDs als ARRAY
+                trassen_ids,  # Trassen-IDs als ARRAY
+                start_knoten,
+                end_knoten,
+                1,  # Segment-ID (kann angepasst werden)
+                kommentar,
+                kommentar_2,  # Wert des Labels "label_Kommentar_2" verwenden
+                verlegestatus,
+                start_knoten,
+                end_knoten,
+                gefoerdert,
+                "Streckenkabel",
+                datum_verlegt
+            ))
 
             # Transaktion abschließen
             conn.commit()
-
-            # Erfolgsmeldung anzeigen
             self.iface.messageBar().pushMessage("Erfolg", "Kabel wurden erfolgreich importiert.", level=Qgis.Success)
             self.reset_form()
 
         except Exception as e:
-            # Fehlerbehandlung und Rollback der Transaktion
             conn.rollback()
             self.iface.messageBar().pushMessage("Fehler", f"Import fehlgeschlagen: {str(e)}", level=Qgis.Critical)
 
         finally:
             if conn is not None:
                 conn.close()
+
 
     # Beispielcode für die Aktion `aktion_startknoten_2`
     def aktion_startknoten_2(self):
@@ -1053,46 +1071,58 @@ class KabelVerlegungsTool(QDialog):
 
             # DATUM_VERLEGT aus mDateTimeEdit_Hauseinfuehrung abrufen
             datum_verlegt = self.ui.mDateTimeEdit_Hauseinfuehrung.date().toString("yyyy-MM-dd")
-            
+
             # Zusätzliche Attribute aus den Eingabefeldern holen
             kommentar = self.ui.label_Kommentar_3.text()
             bezeichnung_intern = f"EK {self.startpunkt_bezeichnung}-{self.hausanschluss_id}"
             verlegestatus = self.ui.comboBox_Verlegestatus_2.currentText()
             gefoerdert = self.ui.comboBox_Gefoerdert_2.currentText()
 
-            for index, verlauf_id in enumerate(self.verlauf_ids_2):
-                seg_id = index + 1
-                layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr")[0]
+            # Sammle alle Trassen-IDs in ein Array
+            trassen_ids = []
+            leerrohr_ids = []
+            layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr")[0]
+
+            for verlauf_id in self.verlauf_ids_2:
+                feature = next(layer.getFeatures(QgsFeatureRequest().setFilterExpression(f'"id" = {verlauf_id}')))
+                if feature["ID_Trasse"] is not None:
+                    trassen_ids.append(int(feature["ID_Trasse"]))
+                leerrohr_ids.append(verlauf_id)
+
+            # Entferne doppelte Trassen-IDs
+            trassen_ids = list(set(trassen_ids))
+
+            # INSERT in die Datenbank
+            insert_query = """
+            INSERT INTO "lwl"."LWL_Kabel_Verlegt"
+            ("KABEL_ID", "KABELTYP", "DATUM_VERLEGT", "ID_LEERROHR", "ID_TRASSE", "VONKNOTEN", "NACHKNOTEN", 
+             "SEGMENT_ID", "KOMMENTAR", "BEZEICHNUNG_INTERN", "VERLEGESTATUS", "STARTKNOTEN", "GEFOERDERT", 
+             "HAUSANSCHLUSS_ID", "VIRTUELLER_KNOTEN", "TYP")
+            VALUES (%s, %s, %s, CAST(%s AS bigint[]), CAST(%s AS bigint[]), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+
+            for index, verlauf_id in enumerate(leerrohr_ids, start=1):
                 feature = next(layer.getFeatures(QgsFeatureRequest().setFilterExpression(f'"id" = {verlauf_id}')))
 
                 von_knoten = feature["VONKNOTEN"] if feature["VONKNOTEN"] not in [QVariant(), None] else None
                 nach_knoten = feature["NACHKNOTEN"] if feature["NACHKNOTEN"] not in [QVariant(), None] else None
-                trassen_id = feature["ID_Trasse"] if feature["ID_Trasse"] not in [QVariant(), None] else None
-
-                insert_query = """
-                INSERT INTO "lwl"."LWL_Kabel_Verlegt"
-                ("KABEL_ID", "KABELTYP", "DATUM_VERLEGT", "ID_LEERROHR", "ID_TRASSE", "VONKNOTEN", "NACHKNOTEN", 
-                 "SEGMENT_ID", "KOMMENTAR", "BEZEICHNUNG_INTERN", "VERLEGESTATUS", "STARTKNOTEN", "GEFOERDERT", 
-                 "HAUSANSCHLUSS_ID", "VIRTUELLER_KNOTEN", "TYP")
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """
 
                 cur.execute(insert_query, (
                     kabel_id,
                     kabeltyp_id,
-                    datum_verlegt,  # Datumswert von mDateTimeEdit_Hauseinfuehrung
-                    verlauf_id,
-                    trassen_id,
+                    datum_verlegt,
+                    [verlauf_id],  # Leerrohr-ID als Array
+                    trassen_ids,  # Trassen-IDs als Array
                     von_knoten,
                     nach_knoten,
-                    seg_id,
+                    index,  # Segment-ID
                     kommentar,
                     bezeichnung_intern,
                     verlegestatus,
-                    self.startpunkt_id_2 if index == 0 else None,
+                    self.startpunkt_id_2 if index == 1 else None,
                     gefoerdert,
-                    self.endpunkt_id_2 if index == len(self.verlauf_ids_2) - 1 else None,
-                    self.virtueller_knoten_id if index == len(self.verlauf_ids_2) - 1 else None,
+                    self.endpunkt_id_2 if index == len(leerrohr_ids) else None,
+                    self.virtueller_knoten_id if index == len(leerrohr_ids) else None,
                     "Hausanschlusskabel"
                 ))
 
