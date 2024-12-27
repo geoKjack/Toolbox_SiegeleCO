@@ -5,6 +5,7 @@ from qgis.PyQt.QtCore import Qt
 from .leerrohr_verlegen_dialog import Ui_LeerrohrVerlegungsToolDialogBase
 from qgis.PyQt.QtSql import QSqlDatabase, QSqlQuery
 from qgis.gui import QgsHighlight
+import psycopg2
 
 class LeerrohrVerlegenTool(QDialog):
     def __init__(self, iface, parent=None):
@@ -46,63 +47,85 @@ class LeerrohrVerlegenTool(QDialog):
         self.populate_gefoerdert_subduct()  # Neue Methode für Gefoerdert und Subduct
         self.populate_verbundnummer()      # Neue Methode für Verbundnummer
 
-    def get_db_connection(self):
+    def get_database_connection(self):
+        """Gibt die Verbindungsinformationen für psycopg2 zurück."""
         layers = QgsProject.instance().mapLayers().values()
-        db = None
         for layer in layers:
             if layer.providerType() == 'postgres':
                 connection_info = QgsDataSourceUri(layer.source())
-                db = QSqlDatabase.addDatabase("QPSQL")
-                db.setHostName(connection_info.host())
-                db.setPort(int(connection_info.port()))
-                db.setDatabaseName(connection_info.database())
-                db.setUserName(connection_info.username())
-                db.setPassword(connection_info.password())
-                break
+                return {
+                    "dbname": connection_info.database(),
+                    "user": connection_info.username(),
+                    "password": connection_info.password(),
+                    "host": connection_info.host(),
+                    "port": connection_info.port()
+                }
+        raise Exception("Keine gültige PostgreSQL-Datenbankverbindung gefunden.")
 
-        if db is None or not db.open():
-            raise Exception("Datenbankverbindung konnte nicht hergestellt werden.")
-
-        return db
 
     def populate_leerrohr_typen(self):
-        db = self.get_db_connection()
-        query = QSqlQuery(db)
-        query.prepare('SELECT "WERT", "TYP" FROM lwl."LUT_Leerrohr_Typ" WHERE "WERT" IN (1, 2, 3)')
+        """Füllt die Dropdown-Liste für Leerrohrtypen."""
+        db_details = self.get_database_connection()  # Verbindungsdetails abrufen
+        conn = psycopg2.connect(
+            dbname=db_details["dbname"],
+            user=db_details["user"],
+            password=db_details["password"],
+            host=db_details["host"],
+            port=db_details["port"]
+        )
+        cur = conn.cursor()
+        try:
+            # Datenbankabfrage ausführen
+            cur.execute('SELECT "WERT", "TYP" FROM lwl."LUT_Leerrohr_Typ" WHERE "WERT" IN (1, 2, 3)')
+            rows = cur.fetchall()
 
-        if not query.exec_():
-            self.ui.label_Pruefung.setText("Fehler beim Abrufen der Leerrohrtypen")
+            # ComboBox leeren und befüllen
+            self.ui.comboBox_leerrohr_typ.clear()
+            for row in rows:
+                wert, typ = row
+                self.ui.comboBox_leerrohr_typ.addItem(typ, wert)
+
+            # Standardmäßig keine Auswahl setzen
+            self.ui.comboBox_leerrohr_typ.setCurrentIndex(-1)
+
+        except Exception as e:
+            self.ui.label_Pruefung.setText(f"Fehler beim Abrufen der Leerrohrtypen: {e}")
             self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
-            return
-
-        self.ui.comboBox_leerrohr_typ.clear()  # Vor dem Befüllen sicherstellen, dass die ComboBox leer ist
-
-        while query.next():
-            wert = query.value(0)
-            typ = query.value(1)
-            self.ui.comboBox_leerrohr_typ.addItem(typ, wert)
-
-        # Setze die ComboBox auf "keine Auswahl"
-        self.ui.comboBox_leerrohr_typ.setCurrentIndex(-1)
+        finally:
+            cur.close()
+            conn.close()
 
     def populate_leerrohr_subtypen(self):
-        db = self.get_db_connection()
-        query = QSqlQuery(db)
-        query.prepare('SELECT "SUBTYP" FROM lwl."LUT_Leerrohr_SubTyp"')
+        db_details = self.get_database_connection()  # Korrekte Methode verwenden
+        conn = psycopg2.connect(
+            dbname=db_details["dbname"],
+            user=db_details["user"],
+            password=db_details["password"],
+            host=db_details["host"],
+            port=db_details["port"]
+        )
+        cur = conn.cursor()
+        try:
+            # SQL-Abfrage ausführen
+            cur.execute('SELECT "SUBTYP" FROM lwl."LUT_Leerrohr_SubTyp"')
+            rows = cur.fetchall()
 
-        if not query.exec_():
-            self.ui.label_Pruefung.setText("Fehler beim Abrufen der Leerrohr-Subtypen")
+            # ComboBox leeren und mit den Ergebnissen füllen
+            self.ui.comboBox_leerrohr_typ_2.clear()
+            for row in rows:
+                subtyp = row[0]
+                self.ui.comboBox_leerrohr_typ_2.addItem(subtyp)
+
+            # Standardmäßig keine Auswahl setzen
+            self.ui.comboBox_leerrohr_typ_2.setCurrentIndex(-1)
+
+        except Exception as e:
+            self.ui.label_Pruefung.setText(f"Fehler beim Abrufen der Subtypen: {e}")
             self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
-            return
+        finally:
+            cur.close()
+            conn.close()
 
-        self.ui.comboBox_leerrohr_typ_2.clear()  # Vor dem Befüllen sicherstellen, dass die ComboBox leer ist
-
-        while query.next():
-            subtyp = query.value(0)
-            self.ui.comboBox_leerrohr_typ_2.addItem(subtyp)
-
-        # Setze die ComboBox auf "keine Auswahl"
-        self.ui.comboBox_leerrohr_typ_2.setCurrentIndex(-1)
 
     def populate_gefoerdert_subduct(self):
         """Füllt die Dropdowns für 'Gefördert' und 'Subduct' mit 'Ja' und 'Nein'."""
@@ -190,23 +213,73 @@ class LeerrohrVerlegenTool(QDialog):
                 self.ui.label_Pruefung.setStyleSheet("background-color: yellow; color: black;")
 
     def pruefe_daten(self):
-        """Prüft die Daten und aktiviert den Import-Button, wenn die Prüfung erfolgreich ist."""
+        """Prüft, ob die ausgewählten Trassen einen durchgängigen Verlauf ohne Lücken und Abzweigungen ergeben und ob alle Pflichtfelder ausgefüllt sind."""
         fehler = []
 
-        # Prüfe, ob eine Trasse ausgewählt wurde
+        # Schritt 1: Prüfe, ob Trassen ausgewählt wurden
         if not self.selected_trasse_ids:
-            fehler.append("Keine Trasse ausgewählt.")
-
-        # Prüfe, ob das Label für den ausgewählten Leerrohr-Typ befüllt ist
+            fehler.append("Keine Trassen ausgewählt.")
+        
+        # Schritt 2: Prüfe, ob die Pflichtfelder gefüllt sind
         if not self.ui.label_gewaehltes_leerrohr.toPlainText().strip():
             fehler.append("Kein Leerrohr-Typ ausgewählt.")
-            
-        
-        # Prüfe, ob ein SubTyp ausgewählt wurde
         if not self.ui.label_gewaehltes_leerrohr_2.toPlainText().strip():
-            fehler.append("Kein Leerrohr-SubTyp ausgewählt.")
+            fehler.append("Kein Leerrohr-Subtyp ausgewählt.")
 
-        # Ergebnis der Prüfung
+        # Schritt 3: Sammeln der Knoteninformationen (nur wenn keine Fehler vorliegen)
+        if not fehler:
+            knoten_dict = {}  # Speichert die Häufigkeit jedes Knotens
+            trassen_info = []  # Speichert Trasseninformationen (ID, VON, NACH)
+
+            db_details = self.get_database_connection()
+            conn = psycopg2.connect(
+                dbname=db_details["dbname"],
+                user=db_details["user"],
+                password=db_details["password"],
+                host=db_details["host"],
+                port=db_details["port"]
+            )
+            cur = conn.cursor()
+            try:
+                for trasse_id in self.selected_trasse_ids:
+                    cur.execute('SELECT "VONKNOTEN", "NACHKNOTEN" FROM lwl."LWL_Trasse" WHERE "id" = %s', (trasse_id,))
+                    row = cur.fetchone()
+                    if row:
+                        vonknoten, nachknoten = row
+                        trassen_info.append((trasse_id, vonknoten, nachknoten))
+
+                        # Zähle die Häufigkeit der Knoten
+                        for knoten in [vonknoten, nachknoten]:
+                            if knoten in knoten_dict:
+                                knoten_dict[knoten] += 1
+                            else:
+                                knoten_dict[knoten] = 1
+                    else:
+                        fehler.append(f"Fehler beim Abrufen der Knoten für Trasse {trasse_id}.")
+                
+                # Schritt 4: Validierung der Knotenhäufigkeiten
+                if not fehler:
+                    startknoten = [knoten for knoten, count in knoten_dict.items() if count == 1]
+                    mittel_knoten = [knoten for knoten, count in knoten_dict.items() if count == 2]
+
+                    if len(startknoten) != 2:  # Es muss genau einen Start- und einen Endknoten geben
+                        fehler.append("Kein durchgängiger Verlauf: Es gibt nicht genau einen Start- und einen Endknoten.")
+
+                    if any(count > 2 for count in knoten_dict.values()):  # Kein Knoten darf öfter als zweimal vorkommen
+                        fehler.append("Kein durchgängiger Verlauf: Es gibt Abzweigungen oder Lücken.")
+
+                # Schritt 5: Reihenfolge der Trassen korrigieren
+                geordnete_trassen = []
+                if not fehler:
+                    geordnete_trassen = self.ordne_trassen(trassen_info)
+
+            except Exception as e:
+                fehler.append(f"Datenbankfehler: {e}")
+            finally:
+                cur.close()
+                conn.close()
+
+        # Schritt 6: Ergebnis anzeigen
         if fehler:
             self.ui.label_Pruefung.setText("; ".join(fehler))
             self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
@@ -216,10 +289,88 @@ class LeerrohrVerlegenTool(QDialog):
             self.ui.label_Pruefung.setStyleSheet("background-color: lightgreen;")
             self.ui.pushButton_Import.setEnabled(True)
 
+    def ordne_trassen(self, trassen_info):
+        """Ordnet die Trassen basierend auf den Knoteninformationen."""
+        if not trassen_info:
+            return []
+
+        geordnete_trassen = [trassen_info.pop(0)]  # Beginne mit der ersten Trasse
+        while trassen_info:
+            letzte_trasse = geordnete_trassen[-1]
+            letzte_knoten = [letzte_trasse[1], letzte_trasse[2]]  # VON und NACH der letzten Trasse
+
+            for i, trasse in enumerate(trassen_info):
+                if trasse[1] in letzte_knoten or trasse[2] in letzte_knoten:  # Knoten verbinden sich
+                    # Drehe Trasse um, falls nötig
+                    if trasse[2] == letzte_trasse[2] or trasse[2] == letzte_trasse[1]:
+                        trasse = (trasse[0], trasse[2], trasse[1])
+                    geordnete_trassen.append(trasse)
+                    trassen_info.pop(i)
+                    break
+        return geordnete_trassen
+
     def importiere_daten(self):
-        """Importiert die Daten (noch nicht implementiert)."""
-        self.ui.label_Pruefung.setText("Daten erfolgreich importiert!")
-        self.ui.label_Pruefung.setStyleSheet("background-color: lightgreen;")
+        """Importiert die Daten aus dem Formular in die Tabelle lwl.LWL_Leerrohr."""
+        conn = None  # Verbindung initialisieren
+        try:
+            # Verbindung zur Datenbank herstellen
+            db_details = self.get_database_connection()
+            conn = psycopg2.connect(
+                dbname=db_details["dbname"],
+                user=db_details["user"],
+                password=db_details["password"],
+                host=db_details["host"],
+                port=db_details["port"]
+            )
+            cur = conn.cursor()
+            conn.autocommit = False
+
+            # Formularwerte auslesen
+            trassen_ids = self.selected_trasse_ids
+            leerrohr_typ = self.ui.comboBox_leerrohr_typ.currentData()
+            leerrohr_subtyp = self.ui.comboBox_leerrohr_typ_2.currentData()
+            gefördert = 'FALSE' if self.ui.comboBox_Gefoerdert.currentText() == "Nein" else 'TRUE'
+            subduct = 'FALSE' if self.ui.comboBox_Subduct.currentText() == "Nein" else 'TRUE'
+            verbundnummer = self.ui.comboBox_Verbundnummer.currentText() if self.ui.comboBox_Verbundnummer.currentText() else None
+            kommentar = self.ui.label_Kommentar.text().strip() if self.ui.label_Kommentar.text().strip() else None
+            beschreibung = self.ui.label_Kommentar_2.text().strip() if self.ui.label_Kommentar_2.text().strip() else None
+            verlegt_am = self.ui.mDateTimeEdit_Strecke.date().toString("yyyy-MM-dd")
+
+            # INSERT-Query vorbereiten
+            insert_query = """
+            INSERT INTO lwl."LWL_Leerrohr" (
+                "ID_TRASSE", "TYP", "SUBTYP", "GEFOERDERT", "SUBDUCT", "VERBUNDNUMMER", 
+                "KOMMENTAR", "BESCHREIBUNG", "VERLEGT_AM"
+            ) VALUES (
+                CAST(%s AS bigint[]), %s, %s, %s, %s, %s, %s, %s, %s
+            )
+            """
+
+            cur.execute(insert_query, (
+                trassen_ids,  # ARRAY für ID_TRASSE
+                leerrohr_typ,  # Typ
+                leerrohr_subtyp,  # Subtyp
+                gefördert,  # Gefördert (TRUE/FALSE)
+                subduct,  # Subduct (TRUE/FALSE)
+                verbundnummer,  # Verbundnummer oder NULL
+                kommentar,  # Kommentar oder NULL
+                beschreibung,  # Beschreibung oder NULL
+                verlegt_am  # Verlegt am (Datum)
+            ))
+
+            conn.commit()
+            self.iface.messageBar().pushMessage("Erfolg", "Daten erfolgreich importiert.", level=Qgis.Success)
+            self.clear_trasse_selection()
+
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            self.iface.messageBar().pushMessage("Fehler", f"Import fehlgeschlagen: {str(e)}", level=Qgis.Critical)
+
+        finally:
+            if conn:
+                conn.close()
+
 
     def clear_trasse_selection(self):
         """Setzt alle Felder und Highlights zurück."""
