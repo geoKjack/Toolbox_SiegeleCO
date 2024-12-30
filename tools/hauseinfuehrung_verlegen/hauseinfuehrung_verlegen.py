@@ -84,14 +84,30 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
             selected_features = layer.selectedFeatures()
             if selected_features:
                 leerrohr_id = selected_features[0]["id"]
-                subtyp_id = selected_features[0]["SUBTYP"]
-                farbschema = selected_features[0]["FARBSCHEMA"]  # Direkter Zugriff auf Farbschema
-                self.startpunkt_id = leerrohr_id
+                subtyp_id = selected_features[0]["SUBTYP"]  # ID des Subtyps
+                farbschema = selected_features[0]["FARBSCHEMA"]
 
-                # Setze die Labels mit exakten Werten
+                # Lookup-Tabelle laden
+                lookup_layer = QgsProject.instance().mapLayersByName("LUT_Leerrohr_SubTyp")[0]
+                subtyp_wert = "Unbekannt"  # Fallback-Wert, falls Lookup fehlschlägt
+
+                # Lookup-Wert finden
+                for feature in lookup_layer.getFeatures():
+                    if feature["id"] == subtyp_id:  # Vergleiche SUBTYP-ID
+                        subtyp_wert = feature["SUBTYP"]  # Beschreibung holen
+                        break
+
+                # Setze die Labels
                 self.ui.label_parentLeerrohr.setText(str(leerrohr_id))  # Nur die ID
-                self.ui.label_farbschema.setText(farbschema)  # Exakter Farbschema-Wert
-                self.ui.label_subtyp.setText(f"SUBTYP: {subtyp_id}")  # Subtyp anzeigen
+                self.ui.label_farbschema.setText(str(farbschema))  # Farbschema-Wert
+                self.ui.label_subtyp.setText(f"SUBTYP: {subtyp_wert}")  # Beschreibung des Subtyps
+
+                # Debug-Ausgabe
+                self.iface.messageBar().pushMessage("Info", f"SUBTYP = {subtyp_wert}, FARBSCHEMA = {farbschema}", level=Qgis.Info)
+
+                # Zeichne Rohre
+                self.zeichne_rohre(subtyp_id, farbschema)
+
 
                 # Debug-Ausgabe
                 self.iface.messageBar().pushMessage("Info", f"SUBTYP = {subtyp_id}, FARBSCHEMA = {farbschema}", level=Qgis.Info)
