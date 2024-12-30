@@ -65,6 +65,17 @@ class KabelVerlegungsTool(QDialog):
         """Überschreibt das Schließen des Dialogs über das rote 'X'."""
         self.first_start = True  # Setzt den Zustand zurück, damit der Dialog erneut geöffnet werden kann
         event.accept()  # Schließt das Fenster tatsächlich
+        if self.startknoten2_highlight:
+            self.startknoten2_highlight.hide()
+            self.startknoten2_highlight = None
+        
+        if self.endknoten2_highlight:
+            self.endknoten2_highlight.hide()
+            self.endknoten2_highlight = None
+            
+        if self.virtueller_knoten_highlight:
+            self.virtueller_knoten_highlight.hide()
+            self.virtueller_knoten_highlight = None
 
     def tr(self, message):
         """Get the translation for a string using Qt translation API."""
@@ -657,10 +668,18 @@ class KabelVerlegungsTool(QDialog):
     def daten_importieren(self):
         """Importiert die geprüften Daten in die Datenbank."""
         try:
-            # Datum aus dem DateTimeEdit-Feld für Streckenkabel abrufen
+            QgsMessageLog.logMessage(f"DEBUG: Startknoten={self.startpunkt_id}, Endknoten={self.endpunkt_id} vor Datenimport", level=Qgis.Info)
+
+            # Sicherstellen, dass Start- und Endknoten definiert sind
+            start_knoten = self.startpunkt_id
+            end_knoten = self.endpunkt_id
+            if not start_knoten or not end_knoten:
+                raise Exception("Start- oder Endknoten nicht definiert.")
+
+            # Datum aus dem DateTimeEdit-Feld abrufen
             datum_verlegt = self.ui.mDateTimeEdit_Strecke.dateTime().toString("yyyy-MM-dd HH:mm:ss")
 
-            # Hole die Datenbankverbindung
+            # Datenbankverbindung aufbauen
             db_uri = self.get_database_connection()
             uri = QgsDataSourceUri(db_uri)
 
@@ -674,29 +693,16 @@ class KabelVerlegungsTool(QDialog):
             cur = conn.cursor()
             conn.autocommit = False
 
-            # Kabeltyp-ID basierend auf dem ausgewählten Text abrufen
+            # Kabeltyp-ID abrufen
             kabel_name = self.ui.comboBox_kabel_typ.currentText()
             kabeltyp_id = self.get_kabeltyp_id(kabel_name)
-
             if not kabeltyp_id:
                 raise Exception("Kabeltyp-ID konnte nicht abgerufen werden.")
 
-            # Bestimme die nächste verfügbare Kabel-ID
+            # Nächste verfügbare Kabel-ID ermitteln
             kabel_id = self.get_next_kabel_id()
 
-            # 1. Start- und Endknoten bestimmen
-            start_knoten = self.startpunkt_id
-            end_knoten = self.endpunkt_id
-            if not start_knoten or not end_knoten:
-                raise Exception("Start- oder Endknoten nicht definiert.")
-
-            # 2. Kommentar, Verlegestatus und Gefördert-Status abrufen
-            kommentar = self.ui.label_Kommentar.text()
-            kommentar_2 = self.ui.label_Kommentar_2.text()  # Wert von label_Kommentar_2 abrufen
-            verlegestatus = self.ui.comboBox_Verlegestatus.currentText()
-            gefoerdert = self.ui.comboBox_Gefoerdert.currentText()
-
-            # 3. IDs der Trassen und Leerrohre sammeln
+            # Leerrohr- und Trassen-IDs sammeln
             layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr")[0]
             trassen_ids = []
             leerrohr_ids = []
@@ -704,13 +710,13 @@ class KabelVerlegungsTool(QDialog):
             for verlauf_id in self.verlauf_ids:
                 feature = next(layer.getFeatures(QgsFeatureRequest().setFilterExpression(f'"id" = {verlauf_id}')))
                 if feature["ID_TRASSE"]:
-                    trassen_ids.extend(feature["ID_TRASSE"])  # IDs der Trassen
-                leerrohr_ids.append(verlauf_id)  # IDs der Leerrohre
+                    trassen_ids.extend(feature["ID_TRASSE"])
+                leerrohr_ids.append(verlauf_id)
 
-            # Entferne doppelte Trassen-IDs
+            # Doppelte Trassen-IDs entfernen
             trassen_ids = list(set(trassen_ids))
 
-            # 4. Daten importieren
+            # SQL-Insert ausführen
             insert_query = """
             INSERT INTO "lwl"."LWL_Kabel_Verlegt"
             ("KABEL_ID", "KABELTYP", "ID_LEERROHR", "ID_TRASSE", "VONKNOTEN", "NACHKNOTEN", "SEGMENT_ID",
@@ -718,37 +724,45 @@ class KabelVerlegungsTool(QDialog):
              "TYP", "DATUM_VERLEGT")
             VALUES (%s, %s, CAST(%s AS bigint[]), CAST(%s AS bigint[]), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
-
             cur.execute(insert_query, (
                 kabel_id,
                 kabeltyp_id,
-                leerrohr_ids,  # Leerrohr-IDs als ARRAY
-                trassen_ids,  # Trassen-IDs als ARRAY
+                leerrohr_ids,
+                trassen_ids,
                 start_knoten,
                 end_knoten,
-                1,  # Segment-ID (kann angepasst werden)
-                kommentar,
-                kommentar_2,  # Wert des Labels "label_Kommentar_2" verwenden
-                verlegestatus,
+                1,  # Segment-ID
+                self.ui.label_Kommentar.text(),
+                self.ui.label_Kommentar_2.text(),
+                self.ui.comboBox_Verlegestatus.currentText(),
                 start_knoten,
                 end_knoten,
-                gefoerdert,
+                self.ui.comboBox_Gefoerdert.currentText(),
                 "Streckenkabel",
                 datum_verlegt
             ))
 
             # Transaktion abschließen
             conn.commit()
+            QgsMessageLog.logMessage("DEBUG: Datenbank-Commit erfolgreich", level=Qgis.Info)
+
             self.iface.messageBar().pushMessage("Erfolg", "Kabel wurden erfolgreich importiert.", level=Qgis.Success)
-            self.reset_form()
+
+            # Funktion beenden, bevor reset_form aufgerufen wird
+            return
 
         except Exception as e:
+            QgsMessageLog.logMessage(f"DEBUG: Fehler während des Imports: {str(e)}", level=Qgis.Critical)
             conn.rollback()
             self.iface.messageBar().pushMessage("Fehler", f"Import fehlgeschlagen: {str(e)}", level=Qgis.Critical)
 
         finally:
             if conn is not None:
-                conn.close()
+                try:
+                    conn.close()
+                except Exception as close_error:
+                    QgsMessageLog.logMessage(f"Fehler beim Schließen der Verbindung: {str(close_error)}", level=Qgis.Critical)
+
 
 
     # Beispielcode für die Aktion `aktion_startknoten_2`

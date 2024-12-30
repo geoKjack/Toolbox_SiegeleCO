@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>525</width>
-    <height>720</height>
+    <width>523</width>
+    <height>716</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -108,9 +108,9 @@
      <property name="geometry">
       <rect>
        <x>10</x>
-       <y>230</y>
+       <y>280</y>
        <width>491</width>
-       <height>291</height>
+       <height>241</height>
       </rect>
      </property>
      <property name="title">
@@ -274,7 +274,7 @@
      <property name="geometry">
       <rect>
        <x>10</x>
-       <y>150</y>
+       <y>200</y>
        <width>491</width>
        <height>71</height>
       </rect>
@@ -325,7 +325,7 @@
        <x>10</x>
        <y>10</y>
        <width>491</width>
-       <height>131</height>
+       <height>181</height>
       </rect>
      </property>
      <property name="title">
@@ -335,7 +335,7 @@
       <property name="geometry">
        <rect>
         <x>10</x>
-        <y>20</y>
+        <y>80</y>
         <width>121</width>
         <height>16</height>
        </rect>
@@ -348,7 +348,7 @@
       <property name="geometry">
        <rect>
         <x>10</x>
-        <y>40</y>
+        <y>100</y>
         <width>181</width>
         <height>22</height>
        </rect>
@@ -358,7 +358,7 @@
       <property name="geometry">
        <rect>
         <x>230</x>
-        <y>40</y>
+        <y>100</y>
         <width>251</width>
         <height>22</height>
        </rect>
@@ -368,7 +368,7 @@
       <property name="geometry">
        <rect>
         <x>230</x>
-        <y>20</y>
+        <y>80</y>
         <width>111</width>
         <height>16</height>
        </rect>
@@ -381,7 +381,7 @@
       <property name="geometry">
        <rect>
         <x>10</x>
-        <y>90</y>
+        <y>150</y>
         <width>181</width>
         <height>22</height>
        </rect>
@@ -391,7 +391,7 @@
       <property name="geometry">
        <rect>
         <x>230</x>
-        <y>90</y>
+        <y>150</y>
         <width>251</width>
         <height>22</height>
        </rect>
@@ -401,7 +401,7 @@
       <property name="geometry">
        <rect>
         <x>230</x>
-        <y>70</y>
+        <y>130</y>
         <width>141</width>
         <height>16</height>
        </rect>
@@ -414,7 +414,7 @@
       <property name="geometry">
        <rect>
         <x>10</x>
-        <y>70</y>
+        <y>130</y>
         <width>161</width>
         <height>16</height>
        </rect>
@@ -423,6 +423,68 @@
        <string>Leerrohrsubtyp auswählen:</string>
       </property>
      </widget>
+     <widget class="QLabel" name="label_7">
+      <property name="geometry">
+       <rect>
+        <x>230</x>
+        <y>24</y>
+        <width>141</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>gewählter Verteilerkasten:</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_3">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>24</y>
+        <width>141</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Verteilerkasten auswählen:</string>
+      </property>
+     </widget>
+     <widget class="QTextEdit" name="label_gewaehlter_verteiler">
+      <property name="geometry">
+       <rect>
+        <x>230</x>
+        <y>44</y>
+        <width>251</width>
+        <height>22</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="pushButton_verteiler">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>43</y>
+        <width>84</width>
+        <height>25</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Verteilerkasten</string>
+      </property>
+     </widget>
+    </widget>
+    <widget class="QCheckBox" name="checkBox_clearForm">
+     <property name="geometry">
+      <rect>
+       <x>230</x>
+       <y>657</y>
+       <width>101</width>
+       <height>18</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Mehrfachimport</string>
+     </property>
     </widget>
     <zorder>groupBox_3</zorder>
     <zorder>button_box</zorder>
@@ -430,6 +492,7 @@
     <zorder>groupBox</zorder>
     <zorder>groupBox_4</zorder>
     <zorder>pushButton_Import</zorder>
+    <zorder>checkBox_clearForm</zorder>
    </widget>
   </widget>
  </widget>
