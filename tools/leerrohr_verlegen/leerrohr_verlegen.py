@@ -45,6 +45,7 @@ class LeerrohrVerlegenTool(QDialog):
 
         # Verbindung für die Auswahl der Typen und Subtypen
         self.ui.comboBox_leerrohr_typ.currentIndexChanged.connect(self.update_selected_leerrohr_typ)
+        self.ui.comboBox_leerrohr_typ.currentIndexChanged.connect(self.populate_leerrohr_subtypen)
         self.ui.comboBox_leerrohr_typ_2.currentIndexChanged.connect(self.update_selected_leerrohr_subtyp)
 
         # Direkt beim Start die Dropdowns füllen
@@ -52,6 +53,7 @@ class LeerrohrVerlegenTool(QDialog):
         self.populate_leerrohr_subtypen()
         self.populate_gefoerdert_subduct()  # Neue Methode für Gefoerdert und Subduct
         self.populate_verbundnummer()      # Neue Methode für Verbundnummer
+        self.populate_farbschema()
 
     def debug_check(self):
         try:
@@ -192,9 +194,27 @@ class LeerrohrVerlegenTool(QDialog):
         finally:
             cur.close()
             conn.close()
+            
+    def update_selected_leerrohr_typ(self):
+        """Aktualisiert das Label für den gewählten Typ."""
+        if self.ui.comboBox_leerrohr_typ.currentIndex() >= 0:
+            typ_text = self.ui.comboBox_leerrohr_typ.currentText()
+            self.ui.label_gewaehltes_leerrohr.setText(typ_text)
+        else:
+            self.ui.label_gewaehltes_leerrohr.clear()
+
 
     def populate_leerrohr_subtypen(self):
-        db_details = self.get_database_connection()  # Korrekte Methode verwenden
+        """Füllt die Subtypen basierend auf dem ausgewählten Typ."""
+        # Hole die ausgewählte Typ-ID aus der ComboBox
+        selected_typ = self.ui.comboBox_leerrohr_typ.currentText()  # Der Text des gewählten Typs
+        if not selected_typ:
+            self.ui.comboBox_leerrohr_typ_2.clear()
+            self.ui.comboBox_leerrohr_typ_2.addItem("Bitte Typ wählen")
+            return
+
+        # Datenbankverbindung herstellen
+        db_details = self.get_database_connection()
         conn = psycopg2.connect(
             dbname=db_details["dbname"],
             user=db_details["user"],
@@ -203,27 +223,40 @@ class LeerrohrVerlegenTool(QDialog):
             port=db_details["port"]
         )
         cur = conn.cursor()
+
         try:
-            # SQL-Abfrage ausführen
-            cur.execute('SELECT "SUBTYP" FROM lwl."LUT_Leerrohr_SubTyp"')
+            # SQL-Abfrage für die Subtypen
+            query = 'SELECT "id", "SUBTYP" FROM lwl."LUT_Leerrohr_SubTyp" WHERE "TYP" = %s'
+            cur.execute(query, (selected_typ,))
             rows = cur.fetchall()
 
-            # ComboBox leeren und mit den Ergebnissen füllen
+            # ComboBox leeren und befüllen
             self.ui.comboBox_leerrohr_typ_2.clear()
-            for row in rows:
-                subtyp = row[0]
-                self.ui.comboBox_leerrohr_typ_2.addItem(subtyp)
+            if rows:
+                for row in rows:
+                    subtyp_id, subtyp_name = row
+                    self.ui.comboBox_leerrohr_typ_2.addItem(subtyp_name, subtyp_id)
+            else:
+                self.ui.comboBox_leerrohr_typ_2.addItem("Keine Subtypen verfügbar")
 
-            # Standardmäßig keine Auswahl setzen
+            # Keine Vorauswahl
             self.ui.comboBox_leerrohr_typ_2.setCurrentIndex(-1)
 
         except Exception as e:
-            self.ui.label_Pruefung.setText(f"Fehler beim Abrufen der Subtypen: {e}")
+            self.ui.label_Pruefung.setText(f"Fehler beim Laden der Subtypen: {e}")
             self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
         finally:
             cur.close()
             conn.close()
 
+    def get_selected_subtyp_id(self):
+        # Prüfe, ob eine Auswahl getroffen wurde
+        if self.ui.comboBox_leerrohr_typ_2.currentIndex() == -1:
+            raise ValueError("Kein Subtyp ausgewählt.")
+        
+        # Abrufen der ID des ausgewählten Subtyps
+        subtyp_id = self.ui.comboBox_leerrohr_typ_2.currentData()
+        return subtyp_id
 
     def populate_gefoerdert_subduct(self):
         """Füllt die Dropdowns für 'Gefördert' und 'Subduct' mit 'Ja' und 'Nein'."""
@@ -314,6 +347,46 @@ class LeerrohrVerlegenTool(QDialog):
             self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
             QgsMessageLog.logMessage(f"Fehler in populate_verbundnummer: {e}", "ToolBox_SiegeleCo", level=Qgis.Critical)
 
+        finally:
+            if cur:
+                cur.close()
+            if conn:
+                conn.close()
+                
+    def populate_farbschema(self):
+        """Füllt die ComboBox für Farbschema mit den Werten aus der Tabelle lwl.LUT_Farbe_Codierung."""
+        try:
+            # Datenbankverbindung herstellen
+            db_details = self.get_database_connection()
+            conn = psycopg2.connect(
+                dbname=db_details["dbname"],
+                user=db_details["user"],
+                password=db_details["password"],
+                host=db_details["host"],
+                port=db_details["port"]
+            )
+            cur = conn.cursor()
+
+            # SQL-Abfrage zur Abrufung der Codierung
+            query = 'SELECT "CODIERUNG" FROM lwl."LUT_Farbe_Codierung"'
+            cur.execute(query)
+            rows = cur.fetchall()
+
+            # ComboBox leeren und befüllen
+            self.ui.comboBox_Farbschema.clear()
+            if rows:
+                for row in rows:
+                    self.ui.comboBox_Farbschema.addItem(row[0])  # Codierung hinzufügen
+            else:
+                self.ui.comboBox_Farbschema.addItem("Keine Daten verfügbar")
+
+            # Keine Vorauswahl setzen
+            self.ui.comboBox_Farbschema.setCurrentIndex(-1)
+
+        except Exception as e:
+            # Fehlerbehandlung für die Benutzeroberfläche
+            self.ui.label_Pruefung.setText(f"Fehler beim Laden des Farbschemas.")
+            self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
         finally:
             if cur:
                 cur.close()
@@ -513,8 +586,10 @@ class LeerrohrVerlegenTool(QDialog):
         """Importiert die Daten aus dem Formular in die Tabelle lwl.LWL_Leerrohr."""
         conn = None  # Verbindung initialisieren
         try:
-            # Verbindung zur Datenbank herstellen
-            db_details = self.get_database_connection()
+            # Datenbankverbindungsdetails abrufen
+            db_details = self.get_database_connection()  # Verbindungsdetails holen
+
+            # Verbindung herstellen
             conn = psycopg2.connect(
                 dbname=db_details["dbname"],
                 user=db_details["user"],
@@ -525,58 +600,51 @@ class LeerrohrVerlegenTool(QDialog):
             cur = conn.cursor()
             conn.autocommit = False
 
-            # Formularwerte auslesen
-            trassen_ids = self.selected_trasse_ids
-            leerrohr_typ = self.ui.comboBox_leerrohr_typ.currentData()
-            leerrohr_subtyp = self.ui.comboBox_leerrohr_typ_2.currentData()
-            gefördert = 'FALSE' if self.ui.comboBox_Gefoerdert.currentText() == "Nein" else 'TRUE'
-            subduct = 'FALSE' if self.ui.comboBox_Subduct.currentText() == "Nein" else 'TRUE'
-            verbundnummer = self.ui.comboBox_Verbundnummer.currentText() if self.ui.comboBox_Verbundnummer.currentText() else None
+            # Trassen-IDs konvertieren
+            trassen_ids_pg_array = "{" + ",".join(map(str, self.selected_trasse_ids)) + "}"
 
-            # Korrigierte Aufrufe für QLineEdit
+            # Null-Werte sicherstellen
+            verbundnummer = self.ui.comboBox_Verbundnummer.currentText() if self.ui.comboBox_Verbundnummer.currentText() else None
             kommentar = self.ui.label_Kommentar.text().strip() if self.ui.label_Kommentar.text().strip() else None
             beschreibung = self.ui.label_Kommentar_2.text().strip() if self.ui.label_Kommentar_2.text().strip() else None
+            farbschema = self.ui.comboBox_Farbschema.currentText() if self.ui.comboBox_Farbschema.currentText() else None
 
-            verlegt_am = self.ui.mDateTimeEdit_Strecke.date().toString("yyyy-MM-dd")
-
-            # INSERT-Query vorbereiten
+            # SQL-Abfrage
             insert_query = """
             INSERT INTO lwl."LWL_Leerrohr" (
                 "ID_TRASSE", "TYP", "SUBTYP", "GEFOERDERT", "SUBDUCT", "VERBUNDNUMMER", 
-                "KOMMENTAR", "BESCHREIBUNG", "VERLEGT_AM"
+                "KOMMENTAR", "BESCHREIBUNG", "VERLEGT_AM", "FARBSCHEMA"
             ) VALUES (
-                CAST(%s AS bigint[]), %s, %s, %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
             )
             """
 
+            # Query ausführen
             cur.execute(insert_query, (
-                trassen_ids,  # ARRAY für ID_TRASSE
-                leerrohr_typ,  # Typ
-                leerrohr_subtyp,  # Subtyp
-                gefördert,  # Gefördert (TRUE/FALSE)
-                subduct,  # Subduct (TRUE/FALSE)
-                verbundnummer,  # Verbundnummer oder NULL
-                kommentar,  # Kommentar oder NULL
-                beschreibung,  # Beschreibung oder NULL
-                verlegt_am  # Verlegt am (Datum)
+                trassen_ids_pg_array,  # PostgreSQL-kompatibles Array
+                self.ui.comboBox_leerrohr_typ.currentData(),  # Typ
+                self.ui.comboBox_leerrohr_typ_2.currentData(),  # Subtyp
+                'TRUE' if self.ui.comboBox_Gefoerdert.currentText() == "Ja" else 'FALSE',  # Gefördert
+                'TRUE' if self.ui.comboBox_Subduct.currentText() == "Ja" else 'FALSE',  # Subduct
+                verbundnummer,  # Verbundnummer
+                kommentar,  # Kommentar
+                beschreibung,  # Beschreibung
+                self.ui.mDateTimeEdit_Strecke.date().toString("yyyy-MM-dd"),  # Verlegt am
+                farbschema  # Farbschema
             ))
 
+            # Änderungen speichern
             conn.commit()
             self.iface.messageBar().pushMessage("Erfolg", "Daten erfolgreich importiert.", level=Qgis.Success)
-            self.populate_verbundnummer() 
-            
-            # Prüfen, ob das Formular geleert werden soll
-            if not self.ui.checkBox_clearForm.isChecked():
-                self.clear_trasse_selection()
-                
         except Exception as e:
             if conn:
                 conn.rollback()
             self.iface.messageBar().pushMessage("Fehler", f"Import fehlgeschlagen: {str(e)}", level=Qgis.Critical)
-
         finally:
             if conn:
                 conn.close()
+
+
 
 
     def clear_trasse_selection(self):
