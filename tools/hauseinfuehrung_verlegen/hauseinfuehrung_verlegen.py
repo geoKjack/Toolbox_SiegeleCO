@@ -8,7 +8,7 @@ from PyQt5.QtCore import Qt, QRectF, QObject, pyqtSignal
 from PyQt5.QtWidgets import QDialog, QGraphicsScene, QGraphicsSimpleTextItem, QGraphicsRectItem, QGraphicsPolygonItem
 from qgis.core import QgsProject, Qgis, QgsFeatureRequest, QgsDataSourceUri, QgsWkbTypes, QgsGeometry, QgsPointXY, QgsVectorLayer, QgsFeature
 from qgis.gui import QgsHighlight, QgsMapToolEdit, QgsMapToolEmitPoint, QgsMapToolCapture, QgsRubberBand, QgsMapTool
-from PyQt5.QtGui import QColor, QBrush, QFont, QPolygonF, QMouseEvent
+from PyQt5.QtGui import QColor, QBrush, QFont, QPolygonF, QMouseEvent, QPen
 import psycopg2
 from .hauseinfuehrung_verlegen_dialog import Ui_HauseinfuehrungsVerlegungsToolDialogBase
 from PyQt5.QtCore import Qt, QRectF, QObject, pyqtSignal, QPointF
@@ -72,11 +72,15 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.startpunkt_id = None
         self.verlauf_ids = []
         self.highlights = []
+        self.gewaehlte_rohrnummer = None  # Speichere die gewählte Rohrnummer
 
         # Datenbankverbindung vorbereiten
         self.db_uri = None
         self.conn = None
         self.init_database_connection()
+        
+        # Variable für das markierte Rechteck
+        self.ausgewähltes_rohr_rect = None  
 
         # Buttons mit Aktionen verknüpfen
         self.ui.pushButton_parentLeerrohr.clicked.connect(self.aktion_parent_leerrohr)
@@ -179,6 +183,10 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.scene = QGraphicsScene()
         self.ui.graphicsView_Farben_Rohre.setScene(self.scene)
 
+        # Zurücksetzen der ausgewählten Rohrnummer und des ausgewählten Rechtecks
+        self.gewaehlte_rohrnummer = None
+        self.ausgewaehltes_rechteck = None
+
         # Daten laden
         rohre = self.lade_farben_und_rohrnummern(subtyp_id, farbschema)
 
@@ -279,8 +287,23 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
 
     def handle_rect_click(self, rohrnummer):
         """Verarbeitet Klicks auf ein Rechteck."""
-        self.iface.messageBar().pushMessage("Info", f"Rechteck mit Rohrnummer {rohrnummer} wurde angeklickt!", level=Qgis.Info)
+        self.iface.messageBar().pushMessage(
+            "Info", f"Rechteck mit Rohrnummer {rohrnummer} wurde angeklickt!", level=Qgis.Info
+        )
 
+        # Entferne bisherigen roten Rahmen
+        if hasattr(self, "ausgewaehltes_rechteck") and self.ausgewaehltes_rechteck:
+            self.ausgewaehltes_rechteck.setPen(QPen(Qt.NoPen))
+
+        # Suche das neue ausgewählte Rechteck und setze einen roten Rahmen
+        for item in self.scene.items():
+            if isinstance(item, ClickableRect) and item.rohrnummer == rohrnummer:
+                item.setPen(QPen(QColor(Qt.red), 5))  # Roter Rahmen
+                self.ausgewaehltes_rechteck = item
+                break
+
+        # Speichere die gewählte Rohrnummer
+        self.gewaehlte_rohrnummer = rohrnummer
 
     def lade_farben_und_rohrnummern(self, subtyp_id, farbschema):
         """Lädt Farben und Rohrnummern aus der Tabelle LUT_Farbe_Rohr."""
@@ -372,8 +395,6 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.map_tool = CustomLineCaptureTool(self.iface.mapCanvas(), point_captured, finalize_geometry)
         self.iface.mapCanvas().setMapTool(self.map_tool)
 
-
-        
     def daten_importieren(self):
         """Importiert die Geometrie und Attribute in die Datenbank."""
         if not hasattr(self, 'erfasste_geom') or self.erfasste_geom is None:
@@ -408,25 +429,48 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
             startpunkt_id = self.startpunkt_id  # Vom Parent Leerrohr gespeicherte ID
             geom_wkt = self.erfasste_geom.asWkt()  # Geometrie in WKT umwandeln
 
+            # Prüfen, ob eine Rohrnummer ausgewählt wurde
+            rohrnummer = getattr(self, "gewaehlte_rohrnummer", None)
+            if rohrnummer is None:
+                self.iface.messageBar().pushMessage(
+                    "Fehler", "Keine Rohrnummer ausgewählt. Bitte wählen Sie eine Rohrnummer aus.", level=Qgis.Critical
+                )
+                return
+
             # Datenbankabfrage
             query = """
                 INSERT INTO "lwl"."LWL_Hauseinfuehrung" (geom, "ID_LEERROHR", "KOMMENTAR", "ROHRNUMMER")
-                VALUES (ST_SetSRID(ST_GeomFromText(%s), 31254), %s, %s, 1)
+                VALUES (ST_SetSRID(ST_GeomFromText(%s), 31254), %s, %s, %s)
             """
-            cur.execute(query, (geom_wkt, startpunkt_id, kommentar))
+            cur.execute(query, (geom_wkt, startpunkt_id, kommentar, rohrnummer))
             self.conn.commit()
 
             # Erfolgsmeldung
             self.iface.messageBar().pushMessage("Erfolg", "Daten erfolgreich importiert.", level=Qgis.Success)
 
-            # Zurücksetzen der Geometrie
-            self.erfasste_geom = None
+            # Formular zurücksetzen
+            self.formular_initialisieren()
 
         except Exception as e:
             self.conn.rollback()
             self.iface.messageBar().pushMessage(
                 "Fehler", f"Fehler beim Importieren der Daten: {e}", level=Qgis.Critical
             )
+
+    def formular_initialisieren(self):
+        """Setzt das Formular auf den Ausgangszustand zurück."""
+        self.startpunkt_id = None
+        self.erfasste_geom = None
+        self.gewaehlte_rohrnummer = None
+        self.ui.label_parentLeerrohr.setText("")
+        self.ui.label_farbschema.setText("")
+        self.ui.label_subtyp.setText("")
+        self.ui.label_Kommentar.setText("")
+        if hasattr(self, "scene"):
+            self.scene.clear()  # Entferne alle grafischen Elemente
+        if hasattr(self, "rubber_band") and self.rubber_band:
+            self.rubber_band.reset()
+        self.iface.messageBar().pushMessage("Info", "Formular wurde zurückgesetzt.", level=Qgis.Info)
 
             
     def closeEvent(self, event):
@@ -437,4 +481,4 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
                 highlight.hide()
             self.highlights.clear()
         # Rufe die Originalmethode auf
-        super().closeEvent(event)
+        super().closeEvent(event) 
