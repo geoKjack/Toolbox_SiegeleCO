@@ -5,7 +5,7 @@ Verlegt Hauseinführungen durch Auswahl von Parent Leerrohr, Verlauf und Endpunk
 """
 
 from PyQt5.QtCore import Qt, QRectF, QObject, pyqtSignal
-from PyQt5.QtWidgets import QDialog, QGraphicsScene, QGraphicsSimpleTextItem, QGraphicsRectItem, QGraphicsPolygonItem
+from PyQt5.QtWidgets import QDialog, QGraphicsScene, QGraphicsSimpleTextItem, QGraphicsRectItem, QGraphicsPolygonItem, QDialogButtonBox
 from qgis.core import QgsProject, Qgis, QgsFeatureRequest, QgsDataSourceUri, QgsWkbTypes, QgsGeometry, QgsPointXY, QgsVectorLayer, QgsFeature
 from qgis.gui import QgsHighlight, QgsMapToolEdit, QgsMapToolEmitPoint, QgsMapToolCapture, QgsRubberBand, QgsMapTool
 from PyQt5.QtGui import QColor, QBrush, QFont, QPolygonF, QMouseEvent, QPen
@@ -67,6 +67,11 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.iface = iface
         self.ui = Ui_HauseinfuehrungsVerlegungsToolDialogBase()
         self.ui.setupUi(self)
+
+        # Verknüpfe den Reset-Button und Cancel-Button
+        self.ui.button_box.button(QDialogButtonBox.Reset).clicked.connect(self.formular_initialisieren)
+        self.ui.button_box.button(QDialogButtonBox.Cancel).clicked.connect(self.abbrechen_und_schliessen)
+
 
         # Initialisiere wichtige Variablen
         self.startpunkt_id = None
@@ -284,26 +289,27 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
 
         self.scene.update()
 
-
     def handle_rect_click(self, rohrnummer):
         """Verarbeitet Klicks auf ein Rechteck."""
         self.iface.messageBar().pushMessage(
             "Info", f"Rechteck mit Rohrnummer {rohrnummer} wurde angeklickt!", level=Qgis.Info
         )
 
-        # Entferne bisherigen roten Rahmen
+        # Entferne den roten Rahmen vom zuvor ausgewählten Rechteck
         if hasattr(self, "ausgewaehltes_rechteck") and self.ausgewaehltes_rechteck:
-            self.ausgewaehltes_rechteck.setPen(QPen(Qt.NoPen))
+            # Stelle den ursprünglichen schwarzen Rahmen wieder her
+            self.ausgewaehltes_rechteck.setPen(QPen(Qt.black))
 
         # Suche das neue ausgewählte Rechteck und setze einen roten Rahmen
         for item in self.scene.items():
             if isinstance(item, ClickableRect) and item.rohrnummer == rohrnummer:
-                item.setPen(QPen(QColor(Qt.red), 5))  # Roter Rahmen
-                self.ausgewaehltes_rechteck = item
+                item.setPen(QPen(QColor(Qt.red), 3))  # Setze roten Rahmen
+                self.ausgewaehltes_rechteck = item  # Aktualisiere das ausgewählte Rechteck
                 break
 
         # Speichere die gewählte Rohrnummer
         self.gewaehlte_rohrnummer = rohrnummer
+
 
     def lade_farben_und_rohrnummern(self, subtyp_id, farbschema):
         """Lädt Farben und Rohrnummern aus der Tabelle LUT_Farbe_Rohr."""
@@ -458,7 +464,7 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
             )
 
     def formular_initialisieren(self):
-        """Setzt das Formular auf den Ausgangszustand zurück."""
+        """Setzt das Formular auf den Ausgangszustand zurück und entfernt Highlights."""
         self.startpunkt_id = None
         self.erfasste_geom = None
         self.gewaehlte_rohrnummer = None
@@ -466,13 +472,27 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.ui.label_farbschema.setText("")
         self.ui.label_subtyp.setText("")
         self.ui.label_Kommentar.setText("")
+        
+        # Entferne grafische Elemente
         if hasattr(self, "scene"):
             self.scene.clear()  # Entferne alle grafischen Elemente
         if hasattr(self, "rubber_band") and self.rubber_band:
             self.rubber_band.reset()
-        self.iface.messageBar().pushMessage("Info", "Formular wurde zurückgesetzt.", level=Qgis.Info)
+        
+        # Entferne Highlights
+        if self.highlights:
+            for highlight in self.highlights:
+                highlight.hide()
+            self.highlights.clear()
 
-            
+        # Zeige eine Info-Meldung an
+        self.iface.messageBar().pushMessage("Info", "Formular und Highlights wurden zurückgesetzt.", level=Qgis.Info)
+
+    def abbrechen_und_schliessen(self):
+        """Ruft die Formularinitialisierung auf und schließt das Fenster."""
+        self.formular_initialisieren()  # Formular zurücksetzen
+        self.close()  # Fenster schließen
+      
     def closeEvent(self, event):
         """Wird aufgerufen, wenn das Fenster geschlossen wird."""
         # Entferne alle bestehenden Highlights
