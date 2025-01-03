@@ -62,35 +62,53 @@ class CustomLineCaptureTool(QgsMapTool):
         self.points = []
 
 class HauseinfuehrungsVerlegungsTool(QDialog):
+    instance = None  # Klassenvariable zur Verwaltung der Instanz
+    
     def __init__(self, iface, parent=None):
+        # Prüfen, ob bereits eine Instanz existiert
+        if HauseinfuehrungsVerlegungsTool.instance is not None:
+            HauseinfuehrungsVerlegungsTool.instance.raise_()
+            HauseinfuehrungsVerlegungsTool.instance.activateWindow()
+            return  # Verhindere, dass eine neue Instanz erstellt wird
+
         super().__init__(parent, Qt.WindowStaysOnTopHint)
         self.iface = iface
         self.ui = Ui_HauseinfuehrungsVerlegungsToolDialogBase()
         self.ui.setupUi(self)
 
+        # Setze die aktuelle Instanz
+        HauseinfuehrungsVerlegungsTool.instance = self
+
         # Verknüpfe den Reset-Button und Cancel-Button
         self.ui.button_box.button(QDialogButtonBox.Reset).clicked.connect(self.formular_initialisieren)
         self.ui.button_box.button(QDialogButtonBox.Cancel).clicked.connect(self.abbrechen_und_schliessen)
 
+        # Verbindung zu Buttons und CheckBox
+        self.ui.pushButton_adresse.clicked.connect(self.adresse_waehlen)
+        self.ui.checkBox_aufschlieung.stateChanged.connect(self.aufschliessungspunkt_verwalten)
 
         # Initialisiere wichtige Variablen
         self.startpunkt_id = None
         self.verlauf_ids = []
         self.highlights = []
+        self.adresspunkt_highlight = None
         self.gewaehlte_rohrnummer = None  # Speichere die gewählte Rohrnummer
 
         # Datenbankverbindung vorbereiten
         self.db_uri = None
         self.conn = None
         self.init_database_connection()
-        
+
         # Variable für das markierte Rechteck
-        self.ausgewähltes_rohr_rect = None  
+        self.ausgewähltes_rohr_rect = None
 
         # Buttons mit Aktionen verknüpfen
         self.ui.pushButton_parentLeerrohr.clicked.connect(self.aktion_parent_leerrohr)
         self.ui.pushButton_verlauf_HA.clicked.connect(self.aktion_verlauf)
         self.ui.pushButton_Import.clicked.connect(self.daten_importieren)
+        self.ui.pushButton_Datenpruefung.clicked.connect(self.daten_pruefen)
+
+
 
     def init_database_connection(self):
         """Initialisiert die Datenbankverbindung."""
@@ -172,7 +190,6 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
 
             else:
                 self.startpunkt_id = None
-                self.iface.messageBar().pushMessage("Fehler", "Kein Leerrohr ausgewählt.", level=Qgis.Critical)
 
         try:
             layer.selectionChanged.disconnect()
@@ -332,12 +349,6 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
 
     def aktion_verlauf(self):
         """Aktion zum Erfassen der Liniengeometrie der Hauseinführung mit Snap auf das Parent Leerrohr."""
-        if self.startpunkt_id is None:
-            self.iface.messageBar().pushMessage(
-                "Fehler", "Kein Parent Leerrohr ausgewählt. Bitte zuerst ein Leerrohr auswählen.", level=Qgis.Critical
-            )
-            return
-
         self.iface.messageBar().pushMessage(
             "Info", "Bitte digitalisieren Sie die Linie der Hauseinführung (Rechtsklick zum Abschließen).", level=Qgis.Info
         )
@@ -401,6 +412,104 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.map_tool = CustomLineCaptureTool(self.iface.mapCanvas(), point_captured, finalize_geometry)
         self.iface.mapCanvas().setMapTool(self.map_tool)
 
+    def aufschliessungspunkt_verwalten(self, state):
+        """Aktiviert/Deaktiviert den Adressauswahlbutton basierend auf der Checkbox."""
+        if state == Qt.Checked:
+            self.ui.pushButton_adresse.setEnabled(False)
+            self.ui.label_adresse.setPlainText("Keine Adresse (Aufschließungspunkt)")
+        else:
+            self.ui.pushButton_adresse.setEnabled(True)
+            self.ui.label_adresse.clear()
+
+    def adresse_waehlen(self):
+        """Öffnet die Auswahl eines Adresspunkts."""
+        self.iface.messageBar().pushMessage("Info", "Bitte wählen Sie einen Adresspunkt auf der Karte aus.", level=Qgis.Info)
+        
+        layer = QgsProject.instance().mapLayersByName("Adressen")[0]  # Schicht "Adressen" wählen
+        self.iface.setActiveLayer(layer)
+        self.iface.actionSelect().trigger()
+
+        def on_adresspunkt_selected():
+            """Wird ausgeführt, wenn ein Adresspunkt ausgewählt wird."""
+            layer = QgsProject.instance().mapLayersByName("Adressen")[0]  # Hole den Adressen-Layer
+            selected_features = layer.selectedFeatures()
+
+            try:
+                # Hole die relevanten Werte aus dem Feature
+                adresspunkt_id = selected_features[0]["ADRKEY"]  # Nutze ADRKEY
+                sname = selected_features[0]["SNAME"]
+                hnr = selected_features[0]["HNR"]
+
+                # Zeige die Adresse im Label an
+                self.ui.label_adresse.setPlainText(f"{sname}, {hnr}")
+
+                # Highlight den Adresspunkt
+                geom = selected_features[0].geometry()
+                if hasattr(self, "adresspunkt_highlight") and self.adresspunkt_highlight:
+                    self.adresspunkt_highlight.hide()
+                self.adresspunkt_highlight = QgsHighlight(self.iface.mapCanvas(), geom, layer)
+                self.adresspunkt_highlight.setColor(QColor(Qt.red))
+                self.adresspunkt_highlight.setWidth(3)
+                self.adresspunkt_highlight.show()
+
+                # Speichere den gewählten Adresspunkt für spätere Verwendung
+                self.gewaehlte_adresse = adresspunkt_id
+
+            except KeyError as e:
+                self.iface.messageBar().pushMessage(
+                    "Fehler", f"Fehlendes Attribut im ausgewählten Adresspunkt: {e}", level=Qgis.Critical
+                )
+
+        try:
+            layer.selectionChanged.disconnect()
+        except TypeError:
+            pass
+
+        layer.selectionChanged.connect(on_adresspunkt_selected)
+
+    def pruefungen_durchfuehren(self):
+        """Führt alle notwendigen Prüfungen durch und gibt eine Liste von Fehlermeldungen zurück."""
+        fehler = []
+
+        # Prüfung: Startpunkt des Leerrohrs ausgewählt
+        if not hasattr(self, "startpunkt_id") or self.startpunkt_id is None:
+            fehler.append("Kein Parent Leerrohr ausgewählt.")
+
+        # Prüfung: Verlauf erfasst
+        if not hasattr(self, "erfasste_geom") or self.erfasste_geom is None:
+            fehler.append("Kein Verlauf der Hauseinführung erfasst.")
+
+        # Prüfung: Rohrnummer ausgewählt
+        if not hasattr(self, "gewaehlte_rohrnummer") or self.gewaehlte_rohrnummer is None:
+            fehler.append("Keine Rohrnummer ausgewählt.")
+
+        # Prüfung: Adresspunkt nur erforderlich, wenn Checkbox nicht aktiviert ist
+        if not self.ui.checkBox_aufschlieung.isChecked():
+            if not hasattr(self, "gewaehlte_adresse") or self.gewaehlte_adresse is None:
+                fehler.append("Kein Adresspunkt ausgewählt, obwohl Aufschließungspunkt nicht gesetzt ist.")
+
+        return fehler
+
+    def daten_pruefen(self):
+        """Führt Prüfungen durch und zeigt Ergebnisse im Label an."""
+        fehler = self.pruefungen_durchfuehren()
+
+        if fehler:
+            # Fehlermeldungen im Label anzeigen
+            self.ui.label_Pruefung.setText("\n".join(fehler))
+            self.ui.label_Pruefung.setStyleSheet(
+                "background-color: rgba(255, 0, 0, 0.2); color: black;"  # Leichtes Rot im Hintergrund, schwarze Schrift
+            )
+            self.ui.pushButton_Import.setEnabled(False)  # Import deaktivieren
+        else:
+            # Erfolgsmeldung anzeigen
+            self.ui.label_Pruefung.setText("Alle Prüfungen erfolgreich bestanden.")
+            self.ui.label_Pruefung.setStyleSheet(
+                "background-color: rgba(0, 255, 0, 0.2); color: black;"  # Leichtes Grün im Hintergrund, schwarze Schrift
+            )
+            self.ui.pushButton_Import.setEnabled(True)  # Import aktivieren
+
+
     def daten_importieren(self):
         """Importiert die Geometrie und Attribute in die Datenbank."""
         if not hasattr(self, 'erfasste_geom') or self.erfasste_geom is None:
@@ -443,7 +552,14 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
                 )
                 return
 
-            # Datenbankabfrage
+            # Wert für ADRKEY prüfen
+            adrkey = getattr(self, "gewaehlte_adresse", None)
+
+            # Setze die ADRKEY-Variable in der aktuellen Session
+            if adrkey is not None:
+                cur.execute("SET LOCAL myapp.current_adrkey = %s;", (adrkey,))
+
+            # Datenbankabfrage für den Import
             query = """
                 INSERT INTO "lwl"."LWL_Hauseinfuehrung" (geom, "ID_LEERROHR", "KOMMENTAR", "ROHRNUMMER")
                 VALUES (ST_SetSRID(ST_GeomFromText(%s), 31254), %s, %s, %s)
@@ -457,11 +573,18 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
             # Formular zurücksetzen
             self.formular_initialisieren()
 
+            # Nach dem Import den Import-Button deaktivieren
+            self.ui.pushButton_Import.setEnabled(False)
+            self.ui.label_Pruefung.setText("")
+            self.ui.label_Pruefung.setStyleSheet("")  # Hintergrundfarbe entfernen
+
         except Exception as e:
             self.conn.rollback()
             self.iface.messageBar().pushMessage(
                 "Fehler", f"Fehler beim Importieren der Daten: {e}", level=Qgis.Critical
             )
+
+
 
     def formular_initialisieren(self):
         """Setzt das Formular auf den Ausgangszustand zurück und entfernt Highlights."""
@@ -472,6 +595,11 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.ui.label_farbschema.setText("")
         self.ui.label_subtyp.setText("")
         self.ui.label_Kommentar.setText("")
+        
+        self.ui.label_adresse.clear()  # Adresse zurücksetzen
+        if self.adresspunkt_highlight:
+            self.adresspunkt_highlight.hide()
+            self.adresspunkt_highlight = None
         
         # Entferne grafische Elemente
         if hasattr(self, "scene"):
@@ -500,5 +628,14 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
             for highlight in self.highlights:
                 highlight.hide()
             self.highlights.clear()
+
+        # Entferne den Adresspunkt-Highlight, falls vorhanden
+        if hasattr(self, "adresspunkt_highlight") and self.adresspunkt_highlight:
+            self.adresspunkt_highlight.hide()
+            self.adresspunkt_highlight = None
+
+        # Setze die Klassenvariable zurück, um Mehrfachöffnungen zu verhindern
+        HauseinfuehrungsVerlegungsTool.instance = None
+
         # Rufe die Originalmethode auf
-        super().closeEvent(event) 
+        super().closeEvent(event)

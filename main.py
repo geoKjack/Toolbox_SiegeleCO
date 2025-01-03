@@ -1,6 +1,7 @@
 from PyQt5.QtWidgets import QAction
 from qgis.PyQt.QtGui import QIcon
 from qgis.core import Qgis
+from PyQt5.QtCore import Qt  
 from . import resources_rc
 from .tools.leerrohr_verlegen.leerrohr_verlegen import LeerrohrVerlegenTool
 from .tools.hauseinfuehrung_verlegen.hauseinfuehrung_verlegen import HauseinfuehrungsVerlegungsTool
@@ -65,13 +66,21 @@ class TollBoxSiegeleCoPlugin:
 
     def run_leerrohr_erfassen(self):
         self.iface.messageBar().pushMessage("Leerrohr Erfassen aktiviert", level=Qgis.Info)
-        self.test_dialog = LeerrohrVerlegenTool(self.iface)  # Übergibt iface korrekt
-        self.test_dialog.show()  # Zeigt den Dialog an
+        if hasattr(self, 'leerrohr_tool') and self.leerrohr_tool is not None:
+            self.leerrohr_tool.close()  # Schließe das bestehende Fenster
+        self.leerrohr_tool = LeerrohrVerlegenTool(self.iface)
+        self.leerrohr_tool.setAttribute(Qt.WA_DeleteOnClose)  # Lösche die Instanz beim Schließen
+        self.leerrohr_tool.show()
 
     def run_hausanschluss_verlegen(self):
-        self.iface.messageBar().pushMessage("Hausanschluss Tool aktiviert", level=Qgis.Info)
-        self.test_dialog = HauseinfuehrungsVerlegungsTool(self.iface)  # Übergibt iface korrekt
-        self.test_dialog.show()  # Zeigt den Dialog an
+        if HauseinfuehrungsVerlegungsTool.instance is not None:
+            HauseinfuehrungsVerlegungsTool.instance.raise_()
+            HauseinfuehrungsVerlegungsTool.instance.activateWindow()
+            return
+
+        self.test_dialog = HauseinfuehrungsVerlegungsTool(self.iface)
+        self.test_dialog.show()
+
 
     def unload(self):
         # Entferne die Symbolleiste bei Deaktivierung des Plugins

@@ -292,6 +292,22 @@
        </rect>
       </property>
      </widget>
+     <widget class="QPushButton" name="pushButton_subduct">
+      <property name="enabled">
+       <bool>false</bool>
+      </property>
+      <property name="geometry">
+       <rect>
+        <x>332</x>
+        <y>178</y>
+        <width>150</width>
+        <height>25</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Hauptrohr</string>
+      </property>
+     </widget>
     </widget>
     <widget class="QGroupBox" name="groupBox">
      <property name="geometry">
