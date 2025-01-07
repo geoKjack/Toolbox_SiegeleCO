@@ -539,6 +539,7 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
                 self.erfasste_geom = QgsGeometry.fromPolylineXY(points)
 
             cur = self.conn.cursor()
+
             # Hol die Attribute aus den UI-Feldern
             kommentar = self.ui.label_Kommentar.text()
             startpunkt_id = self.startpunkt_id  # Vom Parent Leerrohr gespeicherte ID
@@ -552,6 +553,32 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
                 )
                 return
 
+            # Farbwert aus der LUT_Farbe_Rohr-Tabelle abrufen
+            farbschema = self.ui.label_farbschema.toPlainText().strip()
+            subtyp_char = self.ui.label_subtyp.toPlainText().replace("SUBTYP:", "").strip() # Verwende SUBTYP_CHAR direkt aus der GUI
+
+            if not subtyp_char:
+                self.iface.messageBar().pushMessage(
+                    "Fehler", "SUBTYP_CHAR fehlt oder ist ungültig. Bitte überprüfen Sie die Eingabe.", level=Qgis.Critical
+                )
+                return
+
+            cur.execute(
+                """
+                SELECT "FARBE" 
+                FROM "lwl"."LUT_Farbe_Rohr" 
+                WHERE "ROHRNUMMER" = %s AND "FARBSCHEMA" = %s AND "SUBTYP_char" = %s
+                """,
+                (rohrnummer, farbschema, subtyp_char)
+            )
+            result = cur.fetchone()
+            farbe = result[0] if result else None
+
+            if farbe is None:
+                self.iface.messageBar().pushMessage(
+                    "Warnung", f"Kein Farbwert für Rohrnummer {rohrnummer}, Farbschema {farbschema} und SUBTYP_CHAR {subtyp_char} gefunden.", level=Qgis.Warning
+                )
+
             # Wert für ADRKEY prüfen
             adrkey = getattr(self, "gewaehlte_adresse", None)
 
@@ -561,10 +588,10 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
 
             # Datenbankabfrage für den Import
             query = """
-                INSERT INTO "lwl"."LWL_Hauseinfuehrung" (geom, "ID_LEERROHR", "KOMMENTAR", "ROHRNUMMER")
-                VALUES (ST_SetSRID(ST_GeomFromText(%s), 31254), %s, %s, %s)
+                INSERT INTO "lwl"."LWL_Hauseinfuehrung" (geom, "ID_LEERROHR", "KOMMENTAR", "ROHRNUMMER", "FARBE")
+                VALUES (ST_SetSRID(ST_GeomFromText(%s), 31254), %s, %s, %s, %s)
             """
-            cur.execute(query, (geom_wkt, startpunkt_id, kommentar, rohrnummer))
+            cur.execute(query, (geom_wkt, startpunkt_id, kommentar, rohrnummer, farbe))
             self.conn.commit()
 
             # Erfolgsmeldung
@@ -583,8 +610,6 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
             self.iface.messageBar().pushMessage(
                 "Fehler", f"Fehler beim Importieren der Daten: {e}", level=Qgis.Critical
             )
-
-
 
     def formular_initialisieren(self):
         """Setzt das Formular auf den Ausgangszustand zurück und entfernt Highlights."""

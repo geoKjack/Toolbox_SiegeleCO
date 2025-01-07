@@ -7,7 +7,7 @@ from .tools.leerrohr_verlegen.leerrohr_verlegen import LeerrohrVerlegenTool
 from .tools.hauseinfuehrung_verlegen.hauseinfuehrung_verlegen import HauseinfuehrungsVerlegungsTool
 
 
-import sys
+import sys, sip
 sys.path.append(r'C:\Users\marce\AppData\Roaming\QGIS\QGIS3\profiles\default\python\plugins\ToolBox_SiegeleCo')
 
 # Importiere die Tools, falls sie separate Module haben
@@ -66,11 +66,16 @@ class TollBoxSiegeleCoPlugin:
 
     def run_leerrohr_erfassen(self):
         self.iface.messageBar().pushMessage("Leerrohr Erfassen aktiviert", level=Qgis.Info)
-        if hasattr(self, 'leerrohr_tool') and self.leerrohr_tool is not None:
-            self.leerrohr_tool.close()  # Schließe das bestehende Fenster
+        
+        # Überprüfen, ob die Instanz noch gültig ist
+        if self.leerrohr_tool and not sip.isdeleted(self.leerrohr_tool):
+            self.leerrohr_tool.close()
+        
+        # Neue Instanz erstellen
         self.leerrohr_tool = LeerrohrVerlegenTool(self.iface)
-        self.leerrohr_tool.setAttribute(Qt.WA_DeleteOnClose)  # Lösche die Instanz beim Schließen
+        self.leerrohr_tool.setAttribute(Qt.WA_DeleteOnClose)
         self.leerrohr_tool.show()
+
 
     def run_hausanschluss_verlegen(self):
         if HauseinfuehrungsVerlegungsTool.instance is not None:
