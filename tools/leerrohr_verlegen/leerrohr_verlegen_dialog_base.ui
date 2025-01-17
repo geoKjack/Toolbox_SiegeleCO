@@ -281,7 +281,7 @@
        </rect>
       </property>
       <property name="text">
-       <string>Farbschema:</string>
+       <string>Farbschema/Firma:</string>
       </property>
      </widget>
      <widget class="QComboBox" name="comboBox_Farbschema">
@@ -319,6 +319,16 @@
         <x>310</x>
         <y>90</y>
         <width>170</width>
+        <height>22</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QComboBox" name="comboBox_Firma">
+      <property name="geometry">
+       <rect>
+        <x>310</x>
+        <y>59</y>
+        <width>171</width>
         <height>22</height>
        </rect>
       </property>
@@ -427,7 +437,7 @@
         <x>0</x>
         <y>140</y>
         <width>491</width>
-        <height>22</height>
+        <height>71</height>
        </rect>
       </property>
      </widget>

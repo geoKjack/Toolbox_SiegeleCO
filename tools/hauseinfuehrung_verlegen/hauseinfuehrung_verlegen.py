@@ -5,8 +5,8 @@ Verlegt Hauseinführungen durch Auswahl von Parent Leerrohr, Verlauf und Endpunk
 """
 
 from PyQt5.QtCore import Qt, QRectF, QObject, pyqtSignal
-from PyQt5.QtWidgets import QDialog, QGraphicsScene, QGraphicsSimpleTextItem, QGraphicsRectItem, QGraphicsPolygonItem, QDialogButtonBox
-from qgis.core import QgsProject, Qgis, QgsFeatureRequest, QgsDataSourceUri, QgsWkbTypes, QgsGeometry, QgsPointXY, QgsVectorLayer, QgsFeature
+from PyQt5.QtWidgets import QDialog, QGraphicsScene, QGraphicsSimpleTextItem, QGraphicsRectItem, QGraphicsPolygonItem, QDialogButtonBox, QLineEdit, QTextEdit
+from qgis.core import QgsProject, Qgis, QgsFeatureRequest, QgsDataSourceUri, QgsWkbTypes, QgsGeometry, QgsPointXY, QgsVectorLayer, QgsFeature, QgsCoordinateReferenceSystem
 from qgis.gui import QgsHighlight, QgsMapToolEdit, QgsMapToolEmitPoint, QgsMapToolCapture, QgsRubberBand, QgsMapTool
 from PyQt5.QtGui import QColor, QBrush, QFont, QPolygonF, QMouseEvent, QPen
 import psycopg2
@@ -14,16 +14,17 @@ from .hauseinfuehrung_verlegen_dialog import Ui_HauseinfuehrungsVerlegungsToolDi
 from PyQt5.QtCore import Qt, QRectF, QObject, pyqtSignal, QPointF
 
 class ClickableRect(QGraphicsRectItem):
-    def __init__(self, x, y, width, height, rohrnummer, callback, parent=None):
+    def __init__(self, x, y, width, height, rohrnummer, farb_id, callback, parent=None):
         super().__init__(parent)
         self.setRect(x, y, width, height)
         self.rohrnummer = rohrnummer  # Speichere die zugehörige Rohrnummer
-        self.callback = callback  # Übergib die Callback-Funktion
+        self.farb_id = farb_id        # Speichere die zugehörige FARBE-ID
+        self.callback = callback      # Übergib die Callback-Funktion
 
     def mousePressEvent(self, event):
         """Wird ausgelöst, wenn auf das Rechteck geklickt wird."""
         if self.callback:
-            self.callback(self.rohrnummer)  # Rufe die Callback-Funktion mit der Rohrnummer auf
+            self.callback(self.rohrnummer, self.farb_id)  # Rufe die Callback-Funktion mit Rohrnummer und FARBE-ID auf
         super().mousePressEvent(event)
 
 class CustomLineCaptureTool(QgsMapTool):
@@ -63,7 +64,7 @@ class CustomLineCaptureTool(QgsMapTool):
 
 class HauseinfuehrungsVerlegungsTool(QDialog):
     instance = None  # Klassenvariable zur Verwaltung der Instanz
-    
+
     def __init__(self, iface, parent=None):
         # Prüfen, ob bereits eine Instanz existiert
         if HauseinfuehrungsVerlegungsTool.instance is not None:
@@ -75,6 +76,10 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.iface = iface
         self.ui = Ui_HauseinfuehrungsVerlegungsToolDialogBase()
         self.ui.setupUi(self)
+
+        # Initialisiere die Szene für die grafische Ansicht
+        self.scene = QGraphicsScene()
+        self.ui.graphicsView_Farben_Rohre.setScene(self.scene)
 
         # Setze die aktuelle Instanz
         HauseinfuehrungsVerlegungsTool.instance = self
@@ -93,6 +98,7 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.highlights = []
         self.adresspunkt_highlight = None
         self.gewaehlte_rohrnummer = None  # Speichere die gewählte Rohrnummer
+        self.direktmodus = False
 
         # Datenbankverbindung vorbereiten
         self.db_uri = None
@@ -107,8 +113,8 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.ui.pushButton_verlauf_HA.clicked.connect(self.aktion_verlauf)
         self.ui.pushButton_Import.clicked.connect(self.daten_importieren)
         self.ui.pushButton_Datenpruefung.clicked.connect(self.daten_pruefen)
-
-
+        self.ui.checkBox_direkt.stateChanged.connect(self.handle_checkbox_direkt)
+        self.ui.pushButton_verteiler.clicked.connect(self.verteilerkasten_waehlen)
 
     def init_database_connection(self):
         """Initialisiert die Datenbankverbindung."""
@@ -136,6 +142,93 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
                 return uri
         raise Exception("Keine aktive PostgreSQL-Datenbankverbindung gefunden.")
 
+    def handle_checkbox_direkt(self, state):
+        """Aktiviert/Deaktiviert den Button zur Auswahl des Parent-Leerrohrs."""
+        self.direktmodus = (state == Qt.Checked)
+        self.ui.pushButton_parentLeerrohr.setEnabled(not self.direktmodus)
+        
+    def verteilerkasten_waehlen(self):
+        """Ermöglicht die Auswahl eines Verteilerkastens aus der Karte mit visuellem Auswahlwerkzeug."""
+        layer = QgsProject.instance().mapLayersByName("LWL_Knoten")[0]
+        if not layer:
+            self.iface.messageBar().pushMessage("Fehler", "Layer 'LWL_Knoten' nicht gefunden.", level=Qgis.Critical)
+            return
+
+        # Aktiviere den Layer
+        self.iface.setActiveLayer(layer)
+        self.iface.messageBar().pushMessage("Info", "Bitte klicken Sie auf einen Verteilerkasten, um ihn auszuwählen.", level=Qgis.Info)
+
+        # Auswahlwerkzeug vorbereiten
+        self.map_tool = QgsMapToolEmitPoint(self.iface.mapCanvas())
+
+        def on_vertex_selected(point):
+            """Callback-Funktion bei Auswahl eines Punkts."""
+            try:
+                # Erstelle einen kleinen Puffer um den Punkt
+                search_radius = 1.0  # Puffergröße in den Einheiten des Layers
+                point_geom = QgsGeometry.fromPointXY(point)
+                search_rect = point_geom.buffer(search_radius, 1).boundingBox()
+
+                # Suche nach Features im Pufferbereich
+                request = QgsFeatureRequest().setFilterRect(search_rect)
+                features = [feature for feature in layer.getFeatures(request)]
+
+                for feature in features:
+                    if feature["TYP"] == "Verteilerkasten":
+                        verteiler_id = feature["id"]
+
+                        # Aktualisiere UI und speichere die Auswahl
+                        self.gewaehlter_verteiler = verteiler_id
+                        self.ui.label_verteiler.setText(f"Verteilerkasten ID: {verteiler_id}")
+
+                        # Felder und Ansicht zurücksetzen
+                        self.formular_initialisieren_fuer_verteilerwechsel()
+
+                        # Heben Sie das Feature hervor
+                        geom = feature.geometry()
+                        self.highlight_geometry(geom, layer)
+                        return
+
+                self.iface.messageBar().pushMessage("Fehler", "Kein Verteilerkasten an dieser Stelle gefunden.", level=Qgis.Critical)
+
+            except Exception as e:
+                self.iface.messageBar().pushMessage("Fehler", f"Fehler bei der Verteilerkasten-Auswahl: {e}", level=Qgis.Critical)
+
+        self.map_tool.canvasClicked.connect(on_vertex_selected)
+        self.iface.mapCanvas().setMapTool(self.map_tool)
+
+    def formular_initialisieren_fuer_verteilerwechsel(self):
+        """Setzt spezifische Felder und die grafische Ansicht zurück."""
+        # Felder im UI zurücksetzen
+        self.ui.label_parentLeerrohr.clear()
+        self.ui.label_subtyp.clear()
+        self.ui.label_farbschema.clear()
+        self.ui.label_firma.clear()
+
+        # Szene initialisieren, falls sie noch nicht existiert
+        if not hasattr(self, "scene") or self.scene is None:
+            self.scene = QGraphicsScene()
+
+        # Lösche die grafische Ansicht und das ausgewählte Rechteck
+        self.scene.clear()
+        self.ui.graphicsView_Farben_Rohre.setScene(self.scene)
+        self.ausgewaehltes_rechteck = None  # Zurücksetzen des ausgewählten Rechtecks
+
+        # Nachricht für den Benutzer
+        self.iface.messageBar().pushMessage("Info", "Bitte wählen Sie das Leerrohr erneut, um die Daten zu aktualisieren.", level=Qgis.Info)
+
+
+
+    def highlight_geometry(self, geom, layer):
+        """Hebt eine Geometrie hervor."""
+        if hasattr(self, "verteiler_highlight") and self.verteiler_highlight:
+            self.verteiler_highlight.hide()
+
+        self.verteiler_highlight = QgsHighlight(self.iface.mapCanvas(), geom, layer)
+        self.verteiler_highlight.setColor(QColor(Qt.red))
+        self.verteiler_highlight.setWidth(3)
+        self.verteiler_highlight.show()
+
     def aktion_parent_leerrohr(self):
         """Aktion für die Auswahl des Parent Leerrohrs."""
         self.iface.messageBar().pushMessage("Bitte wählen Sie das Parent Leerrohr", level=Qgis.Info)
@@ -153,41 +246,31 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
             if selected_features:
                 # Extrahiere die Werte des ausgewählten Leerrohrs
                 leerrohr_id = selected_features[0]["id"]
-                subtyp_id = selected_features[0]["SUBTYP"]  # ID des Subtyps
+                subtyp_id = selected_features[0]["SUBTYP"]
                 farbschema = selected_features[0]["FARBSCHEMA"]
+                firma = selected_features[0]["FIRMA_HERSTELLER"]  # Hersteller aus dem Feature ablesen
 
-                # Setze die Parent-ID für spätere Verarbeitung
+                # Speichere die Informationen
                 self.startpunkt_id = leerrohr_id
-
-                # Lade die Lookup-Tabelle für die Subtypen
-                lookup_layer = QgsProject.instance().mapLayersByName("LUT_Leerrohr_SubTyp")[0]
-                subtyp_wert = "Unbekannt"  # Fallback-Wert, falls Lookup fehlschlägt
-
-                for feature in lookup_layer.getFeatures():
-                    if feature["id"] == subtyp_id:  # Vergleiche SUBTYP-ID
-                        subtyp_wert = feature["SUBTYP"]  # Beschreibung holen
-                        break
+                self.firma = firma
 
                 # Setze die Labels
-                self.ui.label_parentLeerrohr.setText(str(leerrohr_id))  # Nur die ID
-                self.ui.label_farbschema.setText(str(farbschema))  # Farbschema-Wert
-                self.ui.label_subtyp.setText(f"SUBTYP: {subtyp_wert}")  # Beschreibung des Subtyps
+                self.ui.label_parentLeerrohr.setText(str(leerrohr_id))
+                self.ui.label_farbschema.setText(str(farbschema))
+                self.ui.label_subtyp.setText(f"SUBTYP: {subtyp_id}")
+                self.ui.label_firma.setText(f"Hersteller: {firma}")  # Hersteller im UI anzeigen
 
-                # Debug-Ausgabe
-                self.iface.messageBar().pushMessage("Info", f"SUBTYP = {subtyp_wert}, FARBSCHEMA = {farbschema}", level=Qgis.Info)
-
-                # Zeichne die Rohrnummern-Farbcodierungen
-                self.zeichne_rohre(subtyp_id, farbschema)
+                # Zeichne die Rohre basierend auf den neuen Kriterien
+                self.zeichne_rohre(subtyp_id, farbschema, firma)
 
                 # Highlight das ausgewählte Feature
                 for feature in selected_features:
                     geom = feature.geometry()
                     highlight = QgsHighlight(self.iface.mapCanvas(), geom, layer)
-                    highlight.setColor(Qt.red)  # Farbe für das Highlight
-                    highlight.setWidth(3)  # Dicke des Highlights
+                    highlight.setColor(Qt.red)
+                    highlight.setWidth(3)
                     highlight.show()
                     self.highlights.append(highlight)
-
             else:
                 self.startpunkt_id = None
 
@@ -197,10 +280,10 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
             pass
 
         layer.selectionChanged.connect(onParentLeerrohrSelected)
-
-    def zeichne_rohre(self, subtyp_id, farbschema):
+        
+    def zeichne_rohre(self, subtyp_id, farbschema, firma):
         """Zeichnet klickbare Rechtecke für Rohre basierend auf Subtyp und Farbschema.
-           Bereits belegte Rohrnummern werden ausgegraut und deaktiviert.
+           Berücksichtigt die Logik für spezifische Leerrohre und ihre Richtung.
         """
         self.scene = QGraphicsScene()
         self.ui.graphicsView_Farben_Rohre.setScene(self.scene)
@@ -210,7 +293,7 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.ausgewaehltes_rechteck = None
 
         # Daten laden
-        rohre = self.lade_farben_und_rohrnummern(subtyp_id, farbschema)
+        rohre = self.lade_farben_und_rohrnummern(subtyp_id, farbschema, firma)
 
         if not rohre:
             self.iface.messageBar().pushMessage("Info", "Keine Rohre zum Zeichnen gefunden.", level=Qgis.Warning)
@@ -219,20 +302,56 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         # Abfrage: Welche Rohrnummern sind bereits belegt?
         try:
             cur = self.conn.cursor()
+
+            # Prüfen, ob das Leerrohr an beiden Enden an Verteilern angeschlossen ist
             query = """
-                SELECT "ROHRNUMMER" 
-                FROM "lwl"."LWL_Hauseinfuehrung" 
-                WHERE "ID_LEERROHR" = %s
+                SELECT 
+                    "VONKNOTEN", "NACHKNOTEN", "VKG_LR"
+                FROM 
+                    "lwl"."LWL_Leerrohr"
+                WHERE 
+                    "id" = %s
             """
             cur.execute(query, (self.startpunkt_id,))
+            result = cur.fetchone()
+
+            if not result:
+                self.iface.messageBar().pushMessage("Fehler", "Das gewählte Leerrohr wurde nicht gefunden.", level=Qgis.Critical)
+                return
+
+            vonknoten, nachknoten, vkg_lr = result
+
+            # Prüfen, ob beide Enden an einem Verteiler angeschlossen sind
+            query_verteiler = """
+                SELECT "id"
+                FROM "lwl"."LWL_Knoten"
+                WHERE "id" IN (%s, %s) AND "TYP" = 'Verteilerkasten'
+            """
+            cur.execute(query_verteiler, (vonknoten, nachknoten))
+            verteiler = cur.fetchall()
+            verteiler_ids = [v[0] for v in verteiler]
+
+            # Abfrage aller belegten Rohrnummern für das gewählte Leerrohr (und relevante Verteiler)
+            query_belegte_rohre = """
+                SELECT DISTINCT ha."ROHRNUMMER"
+                FROM "lwl"."LWL_Hauseinfuehrung" ha
+                WHERE ha."ID_LEERROHR" = %s
+                  AND ha."VKG_LR" = %s
+            """
+            cur.execute(query_belegte_rohre, (self.startpunkt_id, self.gewaehlter_verteiler))
             belegte_rohre = [row[0] for row in cur.fetchall()]
+
+            # Debugging: Anzeige der belegten Rohrnummern
+            self.iface.messageBar().pushMessage(
+                "Info", f"Belegte Rohrnummern für Verteiler {self.gewaehlter_verteiler}: {belegte_rohre}", level=Qgis.Info
+            )
+
         except Exception as e:
             self.iface.messageBar().pushMessage("Fehler", f"Fehler beim Abrufen belegter Rohrnummern: {e}", level=Qgis.Critical)
             return
 
-        # Sortiere die Rohrdaten nach Rohrnummer (erste Spalte in der Liste)
-        rohre.sort(key=lambda x: x[0])  # Sortiere nach der Rohrnummer
 
+        # Zeichne die Rohre basierend auf den verfügbaren Daten
         x_offset = 10
         y_offset = 10
         rect_width = 30
@@ -240,7 +359,7 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         spacing = 10
         font_size = 10
 
-        for i, (rohrnummer, farbcode) in enumerate(rohre):
+        for i, (rohrnummer, farbcode, farb_id) in enumerate(rohre):
             farbteile = farbcode.split("-")
             x_pos = x_offset + i * (rect_width + spacing)
 
@@ -249,9 +368,8 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
 
             # Klickbares Rechteck erstellen
             if not ist_belegt:
-                clickable_rect = ClickableRect(x_pos, y_offset, rect_width, rect_height, rohrnummer, self.handle_rect_click)
+                clickable_rect = ClickableRect(x_pos, y_offset, rect_width, rect_height, rohrnummer, farb_id, self.handle_rect_click)
             else:
-                # Dummy-Rechteck ohne Funktion für belegte Rohrnummern
                 clickable_rect = QGraphicsRectItem(x_pos, y_offset, rect_width, rect_height)
                 clickable_rect.setToolTip(f"Rohrnummer {rohrnummer} bereits belegt")
 
@@ -273,18 +391,18 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
 
                 polygon1 = QGraphicsPolygonItem()
                 polygon1.setPolygon(QPolygonF([
-                    QPointF(x_pos, y_offset),  # Oben links
-                    QPointF(x_pos + rect_width, y_offset),  # Oben rechts
-                    QPointF(x_pos, y_offset + rect_height)  # Unten links
+                    QPointF(x_pos, y_offset),
+                    QPointF(x_pos + rect_width, y_offset),
+                    QPointF(x_pos, y_offset + rect_height)
                 ]))
                 polygon1.setBrush(QBrush(color1))
                 self.scene.addItem(polygon1)
 
                 polygon2 = QGraphicsPolygonItem()
                 polygon2.setPolygon(QPolygonF([
-                    QPointF(x_pos + rect_width, y_offset),  # Oben rechts
-                    QPointF(x_pos + rect_width, y_offset + rect_height),  # Unten rechts
-                    QPointF(x_pos, y_offset + rect_height)  # Unten links
+                    QPointF(x_pos + rect_width, y_offset),
+                    QPointF(x_pos + rect_width, y_offset + rect_height),
+                    QPointF(x_pos, y_offset + rect_height)
                 ]))
                 polygon2.setBrush(QBrush(color2))
                 self.scene.addItem(polygon2)
@@ -293,20 +411,21 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
             halo_text = QGraphicsSimpleTextItem(str(rohrnummer))
             halo_text.setBrush(QBrush(Qt.white))
             halo_text.setFont(QFont("Arial", font_size, QFont.Bold))
-            halo_text.setZValue(1)  # Hintergrundebene
-            halo_text.setPos(x_pos + rect_width / 4 - 1, y_offset + rect_height / 4 - 1)  # Leichte Verschiebung für den Halo
+            halo_text.setZValue(1)
+            halo_text.setPos(x_pos + rect_width / 4 - 1, y_offset + rect_height / 4 - 1)
             self.scene.addItem(halo_text)
 
+            # Rohrnummer als Text hinzufügen
             text_item = QGraphicsSimpleTextItem(str(rohrnummer))
             text_item.setBrush(QBrush(Qt.black if not ist_belegt else Qt.gray))
             text_item.setFont(QFont("Arial", font_size, QFont.Bold))
-            text_item.setZValue(2)  # Vordere Ebene
+            text_item.setZValue(2)
             text_item.setPos(x_pos + rect_width / 4, y_offset + rect_height / 4)
             self.scene.addItem(text_item)
 
         self.scene.update()
 
-    def handle_rect_click(self, rohrnummer):
+    def handle_rect_click(self, rohrnummer, farb_id):
         """Verarbeitet Klicks auf ein Rechteck."""
         self.iface.messageBar().pushMessage(
             "Info", f"Rechteck mit Rohrnummer {rohrnummer} wurde angeklickt!", level=Qgis.Info
@@ -314,8 +433,12 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
 
         # Entferne den roten Rahmen vom zuvor ausgewählten Rechteck
         if hasattr(self, "ausgewaehltes_rechteck") and self.ausgewaehltes_rechteck:
-            # Stelle den ursprünglichen schwarzen Rahmen wieder her
-            self.ausgewaehltes_rechteck.setPen(QPen(Qt.black))
+            try:
+                # Stelle den ursprünglichen schwarzen Rahmen wieder her
+                self.ausgewaehltes_rechteck.setPen(QPen(Qt.black))
+            except RuntimeError:
+                # Falls das Objekt gelöscht wurde, ignorieren
+                self.ausgewaehltes_rechteck = None
 
         # Suche das neue ausgewählte Rechteck und setze einen roten Rahmen
         for item in self.scene.items():
@@ -324,21 +447,20 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
                 self.ausgewaehltes_rechteck = item  # Aktualisiere das ausgewählte Rechteck
                 break
 
-        # Speichere die gewählte Rohrnummer
+        # Speichere die gewählte Rohrnummer und die zugehörige Farb-ID
         self.gewaehlte_rohrnummer = rohrnummer
+        self.gewaehlte_farb_id = farb_id  # Speichere die ID der FARBE
 
-
-    def lade_farben_und_rohrnummern(self, subtyp_id, farbschema):
-        """Lädt Farben und Rohrnummern aus der Tabelle LUT_Farbe_Rohr."""
+    def lade_farben_und_rohrnummern(self, subtyp_id, farbschema, firma):
+        """Lädt Farben und Rohrnummern aus der Tabelle LUT_Farbe_Rohr basierend auf Subtyp, Farbschema und Hersteller."""
         try:
             cur = self.conn.cursor()
             query = """
-                SELECT "ROHRNUMMER", "FARBCODE" 
-                FROM "lwl"."LUT_Farbe_Rohr" 
-                WHERE "SUBTYP" = %s AND "FARBSCHEMA" = %s
+                SELECT "ROHRNUMMER", "FARBCODE", "id"
+                FROM "lwl"."LUT_Farbe_Rohr"
+                WHERE "SUBTYP" = %s AND "FARBSCHEMA" = %s AND "FIRMA" = %s
             """
-            self.iface.messageBar().pushMessage("Info", f"SUBTYP = {subtyp_id}, FARBSCHEMA = {farbschema}", level=Qgis.Info)
-            cur.execute(query, (subtyp_id, farbschema))
+            cur.execute(query, (subtyp_id, farbschema, firma))
             result = cur.fetchall()
             if not result:
                 self.iface.messageBar().pushMessage("Info", "Keine Rohre gefunden.", level=Qgis.Warning)
@@ -348,7 +470,7 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
             return []
 
     def aktion_verlauf(self):
-        """Aktion zum Erfassen der Liniengeometrie der Hauseinführung mit Snap auf das Parent Leerrohr."""
+        """Erfasst die Liniengeometrie der Hauseinführung mit Snap auf Leerrohr oder Verteilerkasten."""
         self.iface.messageBar().pushMessage(
             "Info", "Bitte digitalisieren Sie die Linie der Hauseinführung (Rechtsklick zum Abschließen).", level=Qgis.Info
         )
@@ -361,52 +483,95 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.rubber_band.setColor(Qt.red)
         self.rubber_band.setWidth(2)
 
-        # Hole die Geometrie des ausgewählten Leerrohrs
-        layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr")[0]
-        selected_features = [f for f in layer.getFeatures() if f["id"] == self.startpunkt_id]
+        # Entscheide, welche Geometrie für das Snapping verwendet wird
+        snap_geometry = None
+        layer_crs = None
+        if self.ui.checkBox_direkt.isChecked():
+            # Direktmodus: Snap an Verteilerkasten
+            if not self.gewaehlter_verteiler:
+                self.iface.messageBar().pushMessage(
+                    "Fehler", "Kein Verteilerkasten ausgewählt. Bitte wählen Sie einen Verteilerkasten aus.", level=Qgis.Critical
+                )
+                return
 
-        if not selected_features:
+            layer = QgsProject.instance().mapLayersByName("LWL_Knoten")[0]
+            verteiler_feature = next((f for f in layer.getFeatures() if f["id"] == self.gewaehlter_verteiler), None)
+            if not verteiler_feature:
+                self.iface.messageBar().pushMessage(
+                    "Fehler", "Der ausgewählte Verteilerkasten konnte nicht gefunden werden.", level=Qgis.Critical
+                )
+                return
+            snap_geometry = verteiler_feature.geometry()
+            layer_crs = layer.crs()
             self.iface.messageBar().pushMessage(
-                "Fehler", "Das ausgewählte Leerrohr konnte nicht gefunden werden.", level=Qgis.Critical
+                "Info", f"Verteilerkasten-Geometrie geladen: {snap_geometry.asWkt()}", level=Qgis.Info
+            )
+        else:
+            # Standardmodus: Snap an Leerrohr
+            layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr")[0]
+            leerrohr_feature = next((f for f in layer.getFeatures() if f["id"] == self.startpunkt_id), None)
+            if not leerrohr_feature:
+                self.iface.messageBar().pushMessage(
+                    "Fehler", "Das ausgewählte Leerrohr konnte nicht gefunden werden.", level=Qgis.Critical
+                )
+                return
+            snap_geometry = leerrohr_feature.geometry()
+            layer_crs = layer.crs()
+            self.iface.messageBar().pushMessage(
+                "Info", f"Leerrohr-Geometrie geladen: {snap_geometry.asWkt()}", level=Qgis.Info
+            )
+
+        if not snap_geometry:
+            self.iface.messageBar().pushMessage(
+                "Fehler", "Snap-Geometrie konnte nicht geladen werden.", level=Qgis.Critical
             )
             return
 
-        leerrohr_geom = selected_features[0].geometry()
+        # Prüfe den Geometrietyp (Linie oder Punkt)
+        geometry_type = snap_geometry.wkbType()
 
-        def point_captured(point):
-            """Callback, wenn ein Punkt erfasst wird."""
-            if len(self.erfasste_punkte) == 0:
-                # Der erste Punkt wird explizit gesnapped
-                snapped_point = leerrohr_geom.closestSegmentWithContext(point)[1]
-                self.erfasste_punkte.append(QgsPointXY(snapped_point))
-                self.iface.messageBar().pushMessage(
-                    "Info", f"Startpunkt gesnapped: {snapped_point}.", level=Qgis.Success
-                )
-            else:
-                # Weitere Punkte ohne Snapping hinzufügen
-                self.erfasste_punkte.append(QgsPointXY(point))
-
-            self.rubber_band.setToGeometry(QgsGeometry.fromPolylineXY(self.erfasste_punkte), None)
-
-        def finalize_geometry(points):
-            """Callback, wenn die Linie abgeschlossen wird (Rechtsklick)."""
-            if len(points) < 2:
-                self.iface.messageBar().pushMessage(
-                    "Fehler", "Mindestens zwei Punkte erforderlich, um eine Linie zu erstellen.", level=Qgis.Critical
-                )
-                self.erfasste_punkte.clear()
-                self.rubber_band.reset()
-                return
-
-            # Erstelle die finale Geometrie
-            line_geom = QgsGeometry.fromPolylineXY(points)
-
-            # Finalisiere und speichere die Geometrie
-            self.erfasste_geom = line_geom
+        # Prüfe, ob die Geometrie gültig ist und transformiere sie bei Bedarf
+        project_crs = self.iface.mapCanvas().mapSettings().destinationCrs()
+        if layer_crs != project_crs:
             self.iface.messageBar().pushMessage(
-                "Info", "Linie erfolgreich erfasst. Bitte Attribute ausfüllen und auf Import klicken.", level=Qgis.Success
+                "Info", f"Transformiere Geometrie von {layer_crs.authid()} nach {project_crs.authid()}", level=Qgis.Info
             )
-            self.iface.mapCanvas().unsetMapTool(self.map_tool)  # Werkzeug deaktivieren
+            transform = QgsCoordinateTransform(layer_crs, project_crs, QgsProject.instance())
+            snap_geometry = snap_geometry.transform(transform)
+
+        # Callback für Punkt-Erfassung
+        def point_captured(point):
+            """Wird aufgerufen, wenn ein Punkt erfasst wird."""
+            try:
+                if len(self.erfasste_punkte) == 0 and snap_geometry:
+                    # Unterscheide nach Geometrietyp
+                    if geometry_type == QgsWkbTypes.Point:
+                        snapped_point = snap_geometry.asPoint()  # Für Punkte: exakte Koordinate
+                    else:
+                        snapped_point = snap_geometry.closestSegmentWithContext(point)[1]  # Für Linien: nächster Punkt
+                    self.iface.messageBar().pushMessage(
+                        "Info", f"Erster Punkt gesnapped: {snapped_point}.", level=Qgis.Success
+                    )
+                    self.erfasste_punkte.append(QgsPointXY(snapped_point))
+                else:
+                    # Füge nachfolgende Punkte ohne Snapping hinzu
+                    self.erfasste_punkte.append(QgsPointXY(point))
+                # Aktualisiere die Rubberband-Geometrie
+                self.rubber_band.setToGeometry(QgsGeometry.fromPolylineXY(self.erfasste_punkte), None)
+            except Exception as e:
+                self.iface.messageBar().pushMessage(
+                    "Fehler", f"Fehler beim Snapping: {e}", level=Qgis.Critical
+                )
+
+        # Callback für Abschluss der Geometrie
+        def finalize_geometry(points):
+            """Wird aufgerufen, wenn die Linie abgeschlossen wird (Rechtsklick)."""
+            if len(points) < 2:
+                self.iface.messageBar().pushMessage("Fehler", "Mindestens zwei Punkte erforderlich.", level=Qgis.Critical)
+                return
+            self.erfasste_geom = QgsGeometry.fromPolylineXY(points)
+            self.iface.messageBar().pushMessage("Info", "Linie erfolgreich erfasst.", level=Qgis.Success)
+            self.iface.mapCanvas().unsetMapTool(self.map_tool)
 
         # Setze das benutzerdefinierte Werkzeug
         self.map_tool = CustomLineCaptureTool(self.iface.mapCanvas(), point_captured, finalize_geometry)
@@ -471,19 +636,22 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         """Führt alle notwendigen Prüfungen durch und gibt eine Liste von Fehlermeldungen zurück."""
         fehler = []
 
-        # Prüfung: Startpunkt des Leerrohrs ausgewählt
-        if not hasattr(self, "startpunkt_id") or self.startpunkt_id is None:
-            fehler.append("Kein Parent Leerrohr ausgewählt.")
+        if self.ui.checkBox_direkt.isChecked():
+            # Prüfungen für den Direktmodus
+            if not hasattr(self, "gewaehlter_verteiler") or self.gewaehlter_verteiler is None:
+                fehler.append("Kein Verteilerkasten ausgewählt.")
 
-        # Prüfung: Verlauf erfasst
+            # Keine Prüfung der Rohrnummer im Direktmodus
+        else:
+            # Prüfungen für den Nicht-Direktmodus
+            if not hasattr(self, "startpunkt_id") or self.startpunkt_id is None:
+                fehler.append("Kein Parent Leerrohr ausgewählt.")
+            if not hasattr(self, "gewaehlte_rohrnummer") or self.gewaehlte_rohrnummer is None:
+                fehler.append("Keine Rohrnummer ausgewählt.")
+
+        # Gemeinsame Prüfungen für beide Modi
         if not hasattr(self, "erfasste_geom") or self.erfasste_geom is None:
             fehler.append("Kein Verlauf der Hauseinführung erfasst.")
-
-        # Prüfung: Rohrnummer ausgewählt
-        if not hasattr(self, "gewaehlte_rohrnummer") or self.gewaehlte_rohrnummer is None:
-            fehler.append("Keine Rohrnummer ausgewählt.")
-
-        # Prüfung: Adresspunkt nur erforderlich, wenn Checkbox nicht aktiviert ist
         if not self.ui.checkBox_aufschlieung.isChecked():
             if not hasattr(self, "gewaehlte_adresse") or self.gewaehlte_adresse is None:
                 fehler.append("Kein Adresspunkt ausgewählt, obwohl Aufschließungspunkt nicht gesetzt ist.")
@@ -509,7 +677,6 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
             )
             self.ui.pushButton_Import.setEnabled(True)  # Import aktivieren
 
-
     def daten_importieren(self):
         """Importiert die Geometrie und Attribute in die Datenbank."""
         if not hasattr(self, 'erfasste_geom') or self.erfasste_geom is None:
@@ -518,80 +685,80 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
             )
             return  # Import abbrechen
 
-        # Hole die Geometrie des ausgewählten Leerrohrs
-        layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr")[0]
-        selected_features = [f for f in layer.getFeatures() if f["id"] == self.startpunkt_id]
-
-        if not selected_features:
-            self.iface.messageBar().pushMessage(
-                "Fehler", "Das ausgewählte Leerrohr konnte nicht gefunden werden.", level=Qgis.Critical
-            )
-            return
-
-        leerrohr_geom = selected_features[0].geometry()
-
         try:
-            # Snap den Startpunkt erneut auf das Leerrohr
-            points = self.erfasste_geom.asPolyline()
-            if len(points) > 0:
-                snapped_point = leerrohr_geom.closestSegmentWithContext(points[0])[1]
-                points[0] = QgsPointXY(snapped_point)
-                self.erfasste_geom = QgsGeometry.fromPolylineXY(points)
-
             cur = self.conn.cursor()
 
             # Hol die Attribute aus den UI-Feldern
             kommentar = self.ui.label_Kommentar.text()
-            startpunkt_id = self.startpunkt_id  # Vom Parent Leerrohr gespeicherte ID
-            geom_wkt = self.erfasste_geom.asWkt()  # Geometrie in WKT umwandeln
+            geom_wkt = self.erfasste_geom.asWkt()
+            rohrnummer = self.gewaehlte_rohrnummer
+            vkg_lr = self.gewaehlter_verteiler
+            farbe = None
 
-            # Prüfen, ob eine Rohrnummer ausgewählt wurde
-            rohrnummer = getattr(self, "gewaehlte_rohrnummer", None)
-            if rohrnummer is None:
-                self.iface.messageBar().pushMessage(
-                    "Fehler", "Keine Rohrnummer ausgewählt. Bitte wählen Sie eine Rohrnummer aus.", level=Qgis.Critical
-                )
-                return
+            # Prüfen, ob der Direktmodus aktiv ist
+            if self.direktmodus:
+                # Setze die Werte für direkte Hauseinführungen
+                rohrnummer = 0  # Direktmodus: Rohrnummer ist immer 0
+                farbe = 'direkt'  # Direktmodus: Farbe ist immer 'direkt'
 
-            # Farbwert aus der LUT_Farbe_Rohr-Tabelle abrufen
-            farbschema = self.ui.label_farbschema.toPlainText().strip()
-            subtyp_char = self.ui.label_subtyp.toPlainText().replace("SUBTYP:", "").strip() # Verwende SUBTYP_CHAR direkt aus der GUI
+                # Geometrie anpassen, falls Direktmodus
+                if not hasattr(self, "gewaehlter_verteiler") or self.gewaehlter_verteiler is None:
+                    self.iface.messageBar().pushMessage(
+                        "Fehler", "Kein Verteilerkasten ausgewählt.", level=Qgis.Critical
+                    )
+                    return
 
-            if not subtyp_char:
-                self.iface.messageBar().pushMessage(
-                    "Fehler", "SUBTYP_CHAR fehlt oder ist ungültig. Bitte überprüfen Sie die Eingabe.", level=Qgis.Critical
-                )
-                return
+                points = self.erfasste_geom.asPolyline()
+                if len(points) > 1:
+                    points.reverse()
+                    end_point_geom = QgsProject.instance().mapLayersByName("LWL_Knoten")[0].getFeature(vkg_lr).geometry()
+                    points[-1] = end_point_geom.asPoint()
+                    self.erfasste_geom = QgsGeometry.fromPolylineXY(points)
+                    geom_wkt = self.erfasste_geom.asWkt()
 
-            cur.execute(
-                """
-                SELECT "FARBE" 
-                FROM "lwl"."LUT_Farbe_Rohr" 
-                WHERE "ROHRNUMMER" = %s AND "FARBSCHEMA" = %s AND "SUBTYP_char" = %s
-                """,
-                (rohrnummer, farbschema, subtyp_char)
-            )
-            result = cur.fetchone()
-            farbe = result[0] if result else None
+            else:
+                # Logik für normale Hauseinführungen (über Leerrohre)
+                # Abrufen der Farbe anhand der Farb-ID
+                if hasattr(self, "gewaehlte_farb_id") and self.gewaehlte_farb_id is not None:
+                    cur.execute(
+                        """
+                        SELECT "FARBE"
+                        FROM "lwl"."LUT_Farbe_Rohr"
+                        WHERE "id" = %s
+                        """,
+                        (self.gewaehlte_farb_id,)
+                    )
+                    result = cur.fetchone()
+                    farbe = result[0] if result else None
+                    if not farbe:
+                        self.iface.messageBar().pushMessage(
+                            "Warnung", "Keine FARBE für die gewählte Farb-ID gefunden.", level=Qgis.Warning
+                        )
 
-            if farbe is None:
-                self.iface.messageBar().pushMessage(
-                    "Warnung", f"Kein Farbwert für Rohrnummer {rohrnummer}, Farbschema {farbschema} und SUBTYP_CHAR {subtyp_char} gefunden.", level=Qgis.Warning
-                )
+                layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr")[0]
+                selected_features = [f for f in layer.getFeatures() if f["id"] == self.startpunkt_id]
+                if not selected_features:
+                    self.iface.messageBar().pushMessage(
+                        "Fehler", "Das ausgewählte Leerrohr konnte nicht gefunden werden.", level=Qgis.Critical
+                    )
+                    return
 
-            # Wert für ADRKEY prüfen
-            adrkey = getattr(self, "gewaehlte_adresse", None)
+                leerrohr_geom = selected_features[0].geometry()
 
-            # Setze die ADRKEY-Variable in der aktuellen Session
-            if adrkey is not None:
-                cur.execute("SET LOCAL myapp.current_adrkey = %s;", (adrkey,))
+                # Snap den Startpunkt erneut auf das Leerrohr
+                points = self.erfasste_geom.asPolyline()
+                if len(points) > 0:
+                    snapped_point = leerrohr_geom.closestSegmentWithContext(points[0])[1]
+                    points[0] = QgsPointXY(snapped_point)
+                    self.erfasste_geom = QgsGeometry.fromPolylineXY(points)
+                    geom_wkt = self.erfasste_geom.asWkt()
 
             # Datenbankabfrage für den Import
             query = """
-                INSERT INTO "lwl"."LWL_Hauseinfuehrung" (geom, "ID_LEERROHR", "KOMMENTAR", "ROHRNUMMER", "FARBE")
-                VALUES (ST_SetSRID(ST_GeomFromText(%s), 31254), %s, %s, %s, %s)
+                INSERT INTO "lwl"."LWL_Hauseinfuehrung" (geom, "ID_LEERROHR", "KOMMENTAR", "ROHRNUMMER", "FARBE", "VKG_LR")
+                VALUES (ST_SetSRID(ST_GeomFromText(%s), 31254), %s, %s, %s, %s, %s)
             """
-            cur.execute(query, (geom_wkt, startpunkt_id, kommentar, rohrnummer, farbe))
+            cur.execute(query, (geom_wkt, self.startpunkt_id, kommentar, rohrnummer, farbe, vkg_lr))
             self.conn.commit()
 
             # Erfolgsmeldung
@@ -599,11 +766,6 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
 
             # Formular zurücksetzen
             self.formular_initialisieren()
-
-            # Nach dem Import den Import-Button deaktivieren
-            self.ui.pushButton_Import.setEnabled(False)
-            self.ui.label_Pruefung.setText("")
-            self.ui.label_Pruefung.setStyleSheet("")  # Hintergrundfarbe entfernen
 
         except Exception as e:
             self.conn.rollback()
@@ -617,6 +779,8 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.erfasste_geom = None
         self.gewaehlte_rohrnummer = None
         self.ui.label_parentLeerrohr.setText("")
+        self.ui.label_verteiler.setText("")    
+        self.ui.label_firma.setText("")    
         self.ui.label_farbschema.setText("")
         self.ui.label_subtyp.setText("")
         self.ui.label_Kommentar.setText("")
@@ -637,6 +801,11 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
             for highlight in self.highlights:
                 highlight.hide()
             self.highlights.clear()
+
+        # Entferne Verteiler-Highlight (Einzelobjekt)
+        if hasattr(self, "verteiler_highlight") and self.verteiler_highlight:
+            self.verteiler_highlight.hide()
+            self.verteiler_highlight = None
 
         # Zeige eine Info-Meldung an
         self.iface.messageBar().pushMessage("Info", "Formular und Highlights wurden zurückgesetzt.", level=Qgis.Info)
