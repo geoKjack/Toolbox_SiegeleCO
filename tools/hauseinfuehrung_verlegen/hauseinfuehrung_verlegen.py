@@ -108,6 +108,10 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         # Variable für das markierte Rechteck
         self.ausgewähltes_rohr_rect = None
 
+        # ComboBox Gefördert mit JA und NEIN befüllen
+        self.ui.comboBox_Gefoerdert.addItem("")  # Leerer Eintrag als erste Option
+        self.ui.comboBox_Gefoerdert.addItems(["JA", "NEIN"])
+
         # Buttons mit Aktionen verknüpfen
         self.ui.pushButton_parentLeerrohr.clicked.connect(self.aktion_parent_leerrohr)
         self.ui.pushButton_verlauf_HA.clicked.connect(self.aktion_verlauf)
@@ -636,6 +640,11 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         """Führt alle notwendigen Prüfungen durch und gibt eine Liste von Fehlermeldungen zurück."""
         fehler = []
 
+        gefoerdert_text = self.ui.comboBox_Gefoerdert.currentText()
+
+        if gefoerdert_text == "":
+            fehler.append("Bitte wählen Sie einen Wert für 'Gefördert' aus.")
+
         if self.ui.checkBox_direkt.isChecked():
             # Prüfungen für den Direktmodus
             if not hasattr(self, "gewaehlter_verteiler") or self.gewaehlter_verteiler is None:
@@ -690,10 +699,14 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
 
             # Hol die Attribute aus den UI-Feldern
             kommentar = self.ui.label_Kommentar.text()
+            beschreibung = self.ui.label_Kommentar_2.text()
             geom_wkt = self.erfasste_geom.asWkt()
             rohrnummer = self.gewaehlte_rohrnummer
             vkg_lr = self.gewaehlter_verteiler
             farbe = None
+            gefoerdert_text = self.ui.comboBox_Gefoerdert.currentText()  # Wert der ComboBox abgreifen
+            gefoerdert = True if gefoerdert_text == "JA" else False
+            adresspunkt_id = self.gewaehlte_adresse
 
             # Prüfen, ob der Direktmodus aktiv ist
             if self.direktmodus:
@@ -755,10 +768,10 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
 
             # Datenbankabfrage für den Import
             query = """
-                INSERT INTO "lwl"."LWL_Hauseinfuehrung" (geom, "ID_LEERROHR", "KOMMENTAR", "ROHRNUMMER", "FARBE", "VKG_LR")
-                VALUES (ST_SetSRID(ST_GeomFromText(%s), 31254), %s, %s, %s, %s, %s)
+                INSERT INTO "lwl"."LWL_Hauseinfuehrung" (geom, "ID_LEERROHR", "KOMMENTAR", "BESCHREIBUNG", "ROHRNUMMER", "FARBE", "VKG_LR", "HA_ADRKEY", "GEFOERDERT")
+                VALUES (ST_SetSRID(ST_GeomFromText(%s), 31254), %s, %s, %s, %s, %s, %s, %s, %s)
             """
-            cur.execute(query, (geom_wkt, self.startpunkt_id, kommentar, rohrnummer, farbe, vkg_lr))
+            cur.execute(query, (geom_wkt, self.startpunkt_id, kommentar, beschreibung, rohrnummer, farbe, vkg_lr, adresspunkt_id, gefoerdert))
             self.conn.commit()
 
             # Erfolgsmeldung
@@ -784,6 +797,7 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.ui.label_farbschema.setText("")
         self.ui.label_subtyp.setText("")
         self.ui.label_Kommentar.setText("")
+        self.ui.comboBox_Gefoerdert.setCurrentIndex(-1)
         
         self.ui.label_adresse.clear()  # Adresse zurücksetzen
         if self.adresspunkt_highlight:
