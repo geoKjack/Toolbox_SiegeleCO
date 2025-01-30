@@ -169,7 +169,9 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
             """Callback-Funktion bei Auswahl eines Punkts."""
             try:
                 # Erstelle einen kleinen Puffer um den Punkt
-                search_radius = 1.0  # Puffergröße in den Einheiten des Layers
+                pixel_radius = 5  # Suchradius in Pixeln
+                map_units_per_pixel = self.iface.mapCanvas().mapUnitsPerPixel()
+                search_radius = pixel_radius * map_units_per_pixel  # Umrechnung in Kartenkoordinaten
                 point_geom = QgsGeometry.fromPointXY(point)
                 search_rect = point_geom.buffer(search_radius, 1).boundingBox()
 
@@ -193,10 +195,10 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
                         self.highlight_geometry(geom, layer)
                         return
 
-                self.iface.messageBar().pushMessage("Fehler", "Kein Verteilerkasten an dieser Stelle gefunden.", level=Qgis.Critical)
+                self.iface.messageBar().pushMessage("Fehler", "Kein Verteilerkasten an dieser Stelle gefunden.", level=Qgis.Info)
 
             except Exception as e:
-                self.iface.messageBar().pushMessage("Fehler", f"Fehler bei der Verteilerkasten-Auswahl: {e}", level=Qgis.Critical)
+                self.iface.messageBar().pushMessage("Fehler", f"Fehler bei der Verteilerkasten-Auswahl: {e}", level=Qgis.Info)
 
         self.map_tool.canvasClicked.connect(on_vertex_selected)
         self.iface.mapCanvas().setMapTool(self.map_tool)
@@ -603,6 +605,11 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
             layer = QgsProject.instance().mapLayersByName("Adressen")[0]  # Hole den Adressen-Layer
             selected_features = layer.selectedFeatures()
 
+            # Prüfen, ob eine Auswahl getroffen wurde
+            if not selected_features:
+                self.iface.messageBar().pushMessage("Info", "Keine Adresse ausgewählt. Bitte wählen Sie einen Punkt aus.", level=Qgis.Info)
+                return
+
             try:
                 # Hole die relevanten Werte aus dem Feature
                 adresspunkt_id = selected_features[0]["ADRKEY"]  # Nutze ADRKEY
@@ -628,6 +635,7 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
                 self.iface.messageBar().pushMessage(
                     "Fehler", f"Fehlendes Attribut im ausgewählten Adresspunkt: {e}", level=Qgis.Critical
                 )
+
 
         try:
             layer.selectionChanged.disconnect()
@@ -723,9 +731,9 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
 
                 points = self.erfasste_geom.asPolyline()
                 if len(points) > 1:
-                    points.reverse()
-                    end_point_geom = QgsProject.instance().mapLayersByName("LWL_Knoten")[0].getFeature(vkg_lr).geometry()
-                    points[-1] = end_point_geom.asPoint()
+                    #points.reverse() drehen der direkten Hauseinführung
+                    start_point_geom = QgsProject.instance().mapLayersByName("LWL_Knoten")[0].getFeature(vkg_lr).geometry()
+                    points[0] = start_point_geom.asPoint()  # Setze den Startpunkt auf den Knoten
                     self.erfasste_geom = QgsGeometry.fromPolylineXY(points)
                     geom_wkt = self.erfasste_geom.asWkt()
 
