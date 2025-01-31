@@ -127,13 +127,13 @@ class Ui_LeerrohrVerlegungsToolDialogBase(object):
         self.label_gewaehlter_verteiler = QtWidgets.QTextEdit(self.groupBox)
         self.label_gewaehlter_verteiler.setGeometry(QtCore.QRect(230, 40, 251, 22))
         self.label_gewaehlter_verteiler.setObjectName("label_gewaehlter_verteiler")
-        self.groupBox_Rohre = QgsCollapsibleGroupBox(self.groupBox)
-        self.groupBox_Rohre.setGeometry(QtCore.QRect(0, 150, 491, 51))
-        self.groupBox_Rohre.setObjectName("groupBox_Rohre")
         self.pushButton_parent_leerrohr = QtWidgets.QPushButton(self.groupBox)
         self.pushButton_parent_leerrohr.setEnabled(False)
         self.pushButton_parent_leerrohr.setGeometry(QtCore.QRect(10, 110, 84, 25))
         self.pushButton_parent_leerrohr.setObjectName("pushButton_parent_leerrohr")
+        self.graphicsView_Auswahl_Rohre = QtWidgets.QGraphicsView(self.groupBox)
+        self.graphicsView_Auswahl_Rohre.setGeometry(QtCore.QRect(1, 147, 490, 53))
+        self.graphicsView_Auswahl_Rohre.setObjectName("graphicsView_Auswahl_Rohre")
         self.groupBox_4 = QtWidgets.QGroupBox(self.tab)
         self.groupBox_4.setGeometry(QtCore.QRect(10, 10, 491, 151))
         self.groupBox_4.setObjectName("groupBox_4")
@@ -222,5 +222,4 @@ class Ui_LeerrohrVerlegungsToolDialogBase(object):
         self.radioButton_2.setText(_translate("LeerrohrVerlegungsToolDialogBase", "Abzweigung"))
         self.checkBox_clearForm.setText(_translate("LeerrohrVerlegungsToolDialogBase", "Mehrfachimport"))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab), _translate("LeerrohrVerlegungsToolDialogBase", "Leerrohr Verlauf"))
-from qgscollapsiblegroupbox import QgsCollapsibleGroupBox
 from qgsdatetimeedit import QgsDateTimeEdit

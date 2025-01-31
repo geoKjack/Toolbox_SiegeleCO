@@ -431,16 +431,6 @@
        </rect>
       </property>
      </widget>
-     <widget class="QgsCollapsibleGroupBox" name="groupBox_Rohre">
-      <property name="geometry">
-       <rect>
-        <x>0</x>
-        <y>150</y>
-        <width>491</width>
-        <height>51</height>
-       </rect>
-      </property>
-     </widget>
      <widget class="QPushButton" name="pushButton_parent_leerrohr">
       <property name="enabled">
        <bool>false</bool>
@@ -455,6 +445,32 @@
       </property>
       <property name="text">
        <string>Parent Leerrohr</string>
+      </property>
+     </widget>
+     <widget class="QGraphicsView" name="graphicsView_Auswahl_Rohre">
+      <property name="geometry">
+       <rect>
+        <x>1</x>
+        <y>147</y>
+        <width>490</width>
+        <height>53</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="pushButton_parent_leerrohr_2">
+      <property name="enabled">
+       <bool>false</bool>
+      </property>
+      <property name="geometry">
+       <rect>
+        <x>100</x>
+        <y>110</y>
+        <width>111</width>
+        <height>25</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Knoten Abzweigung</string>
       </property>
      </widget>
     </widget>
@@ -622,12 +638,6 @@
   </widget>
  </widget>
  <customwidgets>
-  <customwidget>
-   <class>QgsCollapsibleGroupBox</class>
-   <extends>QGroupBox</extends>
-   <header>qgscollapsiblegroupbox.h</header>
-   <container>1</container>
-  </customwidget>
   <customwidget>
    <class>QgsDateTimeEdit</class>
    <extends>QDateTimeEdit</extends>
