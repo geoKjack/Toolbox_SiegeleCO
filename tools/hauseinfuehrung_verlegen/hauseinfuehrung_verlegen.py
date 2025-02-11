@@ -6,7 +6,7 @@ Verlegt Hauseinführungen durch Auswahl von Parent Leerrohr, Verlauf und Endpunk
 
 from PyQt5.QtCore import Qt, QRectF, QObject, pyqtSignal
 from PyQt5.QtWidgets import QDialog, QGraphicsScene, QGraphicsSimpleTextItem, QGraphicsRectItem, QGraphicsPolygonItem, QDialogButtonBox, QLineEdit, QTextEdit
-from qgis.core import QgsProject, Qgis, QgsFeatureRequest, QgsDataSourceUri, QgsWkbTypes, QgsGeometry, QgsPointXY, QgsVectorLayer, QgsFeature, QgsCoordinateReferenceSystem
+from qgis.core import QgsProject, Qgis, QgsFeatureRequest, QgsDataSourceUri, QgsWkbTypes, QgsGeometry, QgsPointXY, QgsVectorLayer, QgsFeature, QgsCoordinateReferenceSystem, QgsMessageLog
 from qgis.gui import QgsHighlight, QgsMapToolEdit, QgsMapToolEmitPoint, QgsMapToolCapture, QgsRubberBand, QgsMapTool
 from PyQt5.QtGui import QColor, QBrush, QFont, QPolygonF, QMouseEvent, QPen
 import psycopg2
@@ -99,6 +99,7 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.adresspunkt_highlight = None
         self.gewaehlte_rohrnummer = None  # Speichere die gewählte Rohrnummer
         self.direktmodus = False
+        self.gewaehlte_adresse = None  # Gewählte Adresse ist immer mit NON vorhanden
 
         # Datenbankverbindung vorbereiten
         self.db_uri = None
@@ -139,12 +140,27 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         """Holt die aktuelle Datenbankverbindung aus dem Projekt."""
         project = QgsProject.instance()
         layers = project.mapLayers().values()
+
+        QgsMessageLog.logMessage("Suche nach PostgreSQL-Layern...", "DB-Debug", level=Qgis.Info)
+
         for layer in layers:
-            # Prüfe, ob ein PostgreSQL-Layer vorhanden ist und ob er den gewünschten Namen hat
-            if layer.dataProvider().name() == "postgres" and layer.name() == "LWL_Leerrohr":
-                uri = layer.dataProvider().dataSourceUri()
+            layer_name = layer.name()
+            provider_name = layer.dataProvider().name()
+            uri = layer.dataProvider().dataSourceUri()
+
+            QgsMessageLog.logMessage(f"Gefundener Layer: {layer_name} - Provider: {provider_name}", "DB-Debug", level=Qgis.Info)
+            QgsMessageLog.logMessage(f"Datasource URI: {uri}", "DB-Debug", level=Qgis.Info)
+
+            if provider_name == "postgres":
+                QgsMessageLog.logMessage(f"PostgreSQL-Layer gefunden: {layer_name}", "DB-Debug", level=Qgis.Info)
+
+            if provider_name == "postgres" and ("LWL_Leerrohr" in layer_name or "LWL.LWL_Leerrohr" in uri):
+                QgsMessageLog.logMessage(f"Datenbankverbindung gefunden: {uri}", "DB-Debug", level=Qgis.Info)
                 return uri
+
+        QgsMessageLog.logMessage("Keine PostgreSQL-Verbindung gefunden!", "DB-Debug", level=Qgis.Critical)
         raise Exception("Keine aktive PostgreSQL-Datenbankverbindung gefunden.")
+
 
     def handle_checkbox_direkt(self, state):
         """Aktiviert/Deaktiviert den Button zur Auswahl des Parent-Leerrohrs."""
@@ -458,13 +474,14 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.gewaehlte_farb_id = farb_id  # Speichere die ID der FARBE
 
     def lade_farben_und_rohrnummern(self, subtyp_id, farbschema, firma):
-        """Lädt Farben und Rohrnummern aus der Tabelle LUT_Farbe_Rohr basierend auf Subtyp, Farbschema und Hersteller."""
+        """Lädt Farben und Rohrnummern aus der Tabelle LUT_Rohr_Beschreibung basierend auf Subtyp, Farbschema und Hersteller."""
         try:
             cur = self.conn.cursor()
             query = """
                 SELECT "ROHRNUMMER", "FARBCODE", "id"
-                FROM "lwl"."LUT_Farbe_Rohr"
-                WHERE "SUBTYP" = %s AND "FARBSCHEMA" = %s AND "FIRMA" = %s
+                FROM "lwl"."LUT_Rohr_Beschreibung"
+                WHERE "ID_SUBTYP" = %s AND "FARBSCHEMA" = %s AND "FIRMA" = %s
+                ORDER BY "ROHRNUMMER" ASC
             """
             cur.execute(query, (subtyp_id, farbschema, firma))
             result = cur.fetchall()
@@ -588,6 +605,7 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         if state == Qt.Checked:
             self.ui.pushButton_adresse.setEnabled(False)
             self.ui.label_adresse.setPlainText("Keine Adresse (Aufschließungspunkt)")
+            self.gewaehlte_adresse = None  # <-- Hier die Adresse zurücksetzen!
         else:
             self.ui.pushButton_adresse.setEnabled(True)
             self.ui.label_adresse.clear()
@@ -714,7 +732,12 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
             farbe = None
             gefoerdert_text = self.ui.comboBox_Gefoerdert.currentText()  # Wert der ComboBox abgreifen
             gefoerdert = True if gefoerdert_text == "JA" else False
-            adresspunkt_id = self.gewaehlte_adresse
+
+            # Adress-ID setzen (Platzhalter für Aufschließungspunkt oder tatsächlicher ADRKEY)
+            if self.ui.checkBox_aufschlieung.isChecked():
+                adresspunkt_id = -1  # Platzhalter für Aufschließungspunkt
+            else:
+                adresspunkt_id = self.gewaehlte_adresse  # Normaler ADRKEY
 
             # Prüfen, ob der Direktmodus aktiv ist
             if self.direktmodus:
@@ -731,7 +754,6 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
 
                 points = self.erfasste_geom.asPolyline()
                 if len(points) > 1:
-                    #points.reverse() drehen der direkten Hauseinführung
                     start_point_geom = QgsProject.instance().mapLayersByName("LWL_Knoten")[0].getFeature(vkg_lr).geometry()
                     points[0] = start_point_geom.asPoint()  # Setze den Startpunkt auf den Knoten
                     self.erfasste_geom = QgsGeometry.fromPolylineXY(points)
@@ -739,12 +761,11 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
 
             else:
                 # Logik für normale Hauseinführungen (über Leerrohre)
-                # Abrufen der Farbe anhand der Farb-ID
                 if hasattr(self, "gewaehlte_farb_id") and self.gewaehlte_farb_id is not None:
                     cur.execute(
                         """
                         SELECT "FARBE"
-                        FROM "lwl"."LUT_Farbe_Rohr"
+                        FROM "lwl"."LUT_Rohr_Beschreibung"
                         WHERE "id" = %s
                         """,
                         (self.gewaehlte_farb_id,)
@@ -785,6 +806,11 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
             # Erfolgsmeldung
             self.iface.messageBar().pushMessage("Erfolg", "Daten erfolgreich importiert.", level=Qgis.Success)
 
+            # Karte automatisch refreshen, damit die Daten sofort sichtbar sind
+            layer = QgsProject.instance().mapLayersByName("LWL_Hauseinfuehrung")[0]
+            if layer:
+                layer.triggerRepaint()
+
             # Formular zurücksetzen
             self.formular_initialisieren()
 
@@ -793,6 +819,7 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
             self.iface.messageBar().pushMessage(
                 "Fehler", f"Fehler beim Importieren der Daten: {e}", level=Qgis.Critical
             )
+
 
     def formular_initialisieren(self):
         """Setzt das Formular auf den Ausgangszustand zurück und entfernt Highlights."""

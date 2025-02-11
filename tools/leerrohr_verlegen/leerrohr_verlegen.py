@@ -21,17 +21,16 @@ class LeerrohrVerlegenTool(QDialog):
 
         # Initialisiere self.selected_verteiler
         self.selected_verteiler = None
+        self.selected_parent_leerrohr = None 
 
-        # Verknüpfe Buttons und Dropdowns
+        # **Verknüpfe Buttons**
         self.ui.pushButton_verlauf.clicked.connect(self.activate_trasse_selection)
         self.ui.pushButton_Datenpruefung.clicked.connect(self.pruefe_daten)
         self.ui.pushButton_Import.setEnabled(False)
         self.ui.pushButton_Import.clicked.connect(self.importiere_daten)
         self.ui.pushButton_verteiler.clicked.connect(self.select_verteilerkasten)
-        self.ui.comboBox_leerrohr_typ_2.currentIndexChanged.connect(self.populate_farbschema)
-        self.ui.comboBox_Farbschema.currentIndexChanged.connect(self.populate_firma)
-        self.ui.comboBox_leerrohr_typ_2.currentIndexChanged.connect(self.update_selected_leerrohr_subtyp)
 
+        # **Reset & Cancel Buttons**
         reset_button = self.ui.button_box.button(QDialogButtonBox.Reset)
         cancel_button = self.ui.button_box.button(QDialogButtonBox.Cancel)
         if reset_button:
@@ -39,21 +38,39 @@ class LeerrohrVerlegenTool(QDialog):
         if cancel_button:
             cancel_button.clicked.connect(self.close_tool)
 
+        # **Map-Tool-Variablen**
         self.map_tool = None
         self.selected_trasse_ids = []
         self.trasse_highlights = []
         self.verteiler_highlight = None
 
+        # **Radiobuttons für Verlegungsmodus**
+        self.ui.radioButton_Hauptstrang.toggled.connect(self.update_verlegungsmodus)
+        self.ui.radioButton_Abzweigung.toggled.connect(self.update_verlegungsmodus)
+
+        # **Dropdown-Verknüpfungen**
         self.ui.comboBox_leerrohr_typ.currentIndexChanged.connect(self.update_selected_leerrohr_typ)
         self.ui.comboBox_leerrohr_typ.currentIndexChanged.connect(self.populate_leerrohr_subtypen)
         self.ui.comboBox_leerrohr_typ_2.currentIndexChanged.connect(self.update_selected_leerrohr_subtyp)
         self.ui.comboBox_leerrohr_typ.currentIndexChanged.connect(self.update_combobox_states)
 
-        # Direkte Aufrufe nur für Typen und Farbschema, nicht für Verbundnummern
+        # **🚀 NEUE FIXES: Korrekte Reihenfolge für Abhängigkeiten**
+        self.ui.comboBox_Firma.currentIndexChanged.connect(self.populate_farbschema)  # ✅ Firma -> Farbschema aktualisieren
+        self.ui.comboBox_Farbschema.currentIndexChanged.connect(self.populate_leerrohr_subtypen)  # ✅ Farbschema -> Subtypen aktualisieren
+        self.ui.comboBox_leerrohr_typ.currentIndexChanged.connect(self.populate_firma)
+
+        # **Setze Standardzustand (Firma deaktiviert)**
+        self.ui.comboBox_Firma.setEnabled(False)
+
+        # **Direkte Initialisierung**
         self.populate_leerrohr_typen()
-        self.populate_leerrohr_subtypen()
         self.populate_gefoerdert_subduct()
-        self.populate_farbschema()
+        self.populate_farbschema()  # ✅ Lädt jetzt, wenn eine Firma gewählt wird
+
+        # **Erzwinge eine Initialisierung des Verlegungsmodus**
+        self.update_verlegungsmodus()
+        
+        QgsMessageLog.logMessage(str(dir(self.ui)), "Leerrohr-Tool", level=Qgis.Info)
 
     def debug_check(self):
         try:
@@ -93,7 +110,6 @@ class LeerrohrVerlegenTool(QDialog):
 
         print("Debugging abgeschlossen.")
 
-
     def get_database_connection(self):
         """Gibt die Verbindungsinformationen für psycopg2 zurück."""
         layers = QgsProject.instance().mapLayers().values()
@@ -108,6 +124,86 @@ class LeerrohrVerlegenTool(QDialog):
                     "port": connection_info.port()
                 }
         raise Exception("Keine gültige PostgreSQL-Datenbankverbindung gefunden.")
+        
+    def update_verlegungsmodus(self):
+        """Aktiviert oder deaktiviert Felder je nach Auswahl von Hauptstrang/Abzweigung."""
+
+        if self.ui.radioButton_Hauptstrang.isChecked():
+            # ✅ Hauptstrang-Modus → Typ & Subtyp aktivieren, Parent & Knoten deaktivieren
+            self.populate_leerrohr_typen()  # ← Typen neu laden!
+            self.populate_leerrohr_subtypen()  # ← Subtypen neu laden!
+
+            self.ui.comboBox_leerrohr_typ.setEnabled(True)
+            self.ui.comboBox_leerrohr_typ_2.setEnabled(True)
+
+            self.ui.pushButton_Parent_Leerrohr.setEnabled(False)  
+            self.ui.pushButton_Knoten_Abzweigung.setEnabled(False)   
+
+            # Attribute aktivieren
+            self.ui.comboBox_Verbundnummer.setEnabled(True)
+            self.ui.comboBox_Farbschema.setEnabled(True)
+            self.ui.comboBox_Gefoerdert.setEnabled(True)
+            self.ui.comboBox_Subduct.setEnabled(True)
+            self.ui.label_Kommentar.setEnabled(True)
+            self.ui.label_Kommentar_2.setEnabled(True)
+            self.ui.mDateTimeEdit_Strecke.setEnabled(True)
+
+            # **Firma-ComboBox wird nur aktiviert, wenn update_combobox_states() es erlaubt**
+            self.update_combobox_states()
+
+        else:
+            # ✅ Abzweigungs-Modus → Typ & Subtyp deaktivieren, Parent & Knoten aktivieren
+            self.ui.comboBox_leerrohr_typ.clear()  # Erst leeren
+            self.ui.comboBox_leerrohr_typ.addItem("Deaktiviert")  # Dann Eintrag hinzufügen
+            self.ui.comboBox_leerrohr_typ.setEnabled(False)  # Danach deaktivieren
+            
+            self.ui.comboBox_leerrohr_typ_2.clear()
+            self.ui.comboBox_leerrohr_typ_2.addItem("Deaktiviert")
+            self.ui.comboBox_leerrohr_typ_2.setEnabled(False)
+
+            self.ui.pushButton_Parent_Leerrohr.setEnabled(True)  
+            self.ui.pushButton_Knoten_Abzweigung.setEnabled(True)  
+
+
+            # **Firma ZWANGSWEISE deaktivieren**
+            self.ui.comboBox_Firma.clear()  
+            self.ui.comboBox_Firma.setEnabled(False)  
+
+            # **Attribute deaktivieren, aber Werte aus Parent-Leerrohr übernehmen**
+            self.ui.comboBox_Verbundnummer.setEnabled(False)
+            self.ui.comboBox_Farbschema.setEnabled(False)
+            self.ui.comboBox_Gefoerdert.setEnabled(False)
+            self.ui.comboBox_Subduct.setEnabled(False)
+            self.ui.label_Kommentar.setEnabled(False)
+            self.ui.label_Kommentar_2.setEnabled(False)
+            self.ui.mDateTimeEdit_Strecke.setEnabled(False)
+
+            # Falls Parent-Leerrohr gewählt wurde → Werte übernehmen
+            if self.selected_parent_leerrohr:
+                if "VERBUNDNUMMER" in self.selected_parent_leerrohr:
+                    index = self.ui.comboBox_Verbundnummer.findText(str(self.selected_parent_leerrohr["VERBUNDNUMMER"]))
+                    if index != -1:
+                        self.ui.comboBox_Verbundnummer.setCurrentIndex(index)
+
+                if "FARBSCHEMA" in self.selected_parent_leerrohr:
+                    index = self.ui.comboBox_Farbschema.findText(self.selected_parent_leerrohr["FARBSCHEMA"])
+                    if index != -1:
+                        self.ui.comboBox_Farbschema.setCurrentIndex(index)
+
+                if "GEFOERDERT" in self.selected_parent_leerrohr:
+                    self.ui.comboBox_Gefoerdert.setCurrentText("Ja" if self.selected_parent_leerrohr["GEFOERDERT"] else "Nein")
+
+                if "SUBDUCT" in self.selected_parent_leerrohr:
+                    self.ui.comboBox_Subduct.setCurrentText("Ja" if self.selected_parent_leerrohr["SUBDUCT"] else "Nein")
+
+                if "KOMMENTAR" in self.selected_parent_leerrohr:
+                    self.ui.label_Kommentar.setText(self.selected_parent_leerrohr["KOMMENTAR"])
+
+                if "BESCHREIBUNG" in self.selected_parent_leerrohr:
+                    self.ui.label_Kommentar_2.setText(self.selected_parent_leerrohr["BESCHREIBUNG"])
+
+                if "VERLEGT_AM" in self.selected_parent_leerrohr:
+                    self.ui.mDateTimeEdit_Strecke.setDate(self.selected_parent_leerrohr["VERLEGT_AM"])
 
     def select_verteilerkasten(self):
         """Aktiviert das Map-Tool zum Auswählen eines Verteilerkastens."""
@@ -133,7 +229,7 @@ class LeerrohrVerlegenTool(QDialog):
         threshold_distance = 20  # Maximale Entfernung in Metern
 
         for feature in layer.getFeatures():
-            if feature["TYP"] != "Verteilerkasten":
+            if feature["TYP"] not in ["Verteilerkasten", "Schacht", "Ortszentrale"]:
                 continue
             distance = feature.geometry().distance(QgsGeometry.fromPointXY(point))
             if distance < nearest_distance:
@@ -176,11 +272,14 @@ class LeerrohrVerlegenTool(QDialog):
         if selected_typ == 3:  # Überprüft, ob der TYP 'Multi-Rohr' ist (TYP = 3)
             self.ui.comboBox_Verbundnummer.setEnabled(True)
             self.ui.comboBox_Farbschema.setEnabled(True)
+            self.ui.comboBox_Firma.setEnabled(True)
         else:
             self.ui.comboBox_Verbundnummer.setEnabled(False)
             self.ui.comboBox_Farbschema.setEnabled(False)
+            self.ui.comboBox_Firma.setEnabled(False) 
             self.ui.comboBox_Verbundnummer.setCurrentIndex(-1)  # Auswahl zurücksetzen
             self.ui.comboBox_Farbschema.setCurrentIndex(-1)    # Auswahl zurücksetzen
+            self.ui.comboBox_Firma.setCurrentIndex(-1)
 
     def populate_leerrohr_typen(self):
         """Füllt die Dropdown-Liste für Leerrohrtypen."""
@@ -223,62 +322,86 @@ class LeerrohrVerlegenTool(QDialog):
             self.ui.label_gewaehltes_leerrohr.clear()
 
     def populate_leerrohr_subtypen(self):
-        """Füllt die Subtypen basierend auf dem ausgewählten Typ."""
-        # Hole die ausgewählte Typ-ID aus der ComboBox
-        selected_typ = self.ui.comboBox_leerrohr_typ.currentText()  # Der Text des gewählten Typs
-        if not selected_typ:
-            self.ui.comboBox_leerrohr_typ_2.clear()
-            self.ui.comboBox_leerrohr_typ_2.addItem("Bitte Typ wählen")
+        """Füllt die ComboBox für Leerrohr-Subtypen basierend auf Typ, Farbschema und Firma."""
+        self.ui.comboBox_leerrohr_typ_2.blockSignals(True)
+        self.ui.comboBox_leerrohr_typ_2.clear()
+        self.ui.comboBox_leerrohr_typ_2.setEnabled(False)
+        
+        # 🚨 NEUER FIX: Label für Subtyp sofort leeren, wenn kein Typ gewählt wurde
+        self.ui.label_gewaehltes_leerrohr_2.clear()
+
+        typ_id = self.ui.comboBox_leerrohr_typ.currentData()
+        farbschema = self.ui.comboBox_Farbschema.currentText().strip()
+        firma = self.ui.comboBox_Firma.currentText().strip()
+
+        # 🚨 Falls kein Typ gewählt ist, brich die Methode sofort ab!
+        if not typ_id:
+            self.ui.comboBox_leerrohr_typ_2.addItem("Bitte zuerst einen Typ wählen")
+            self.ui.comboBox_leerrohr_typ_2.blockSignals(False)
             return
 
-        # Datenbankverbindung herstellen
+        if not farbschema or not firma:
+            self.ui.comboBox_leerrohr_typ_2.addItem("Bitte Farbschema wählen")
+            self.ui.comboBox_leerrohr_typ_2.blockSignals(False)
+            return
+
         db_details = self.get_database_connection()
-        conn = psycopg2.connect(
-            dbname=db_details["dbname"],
-            user=db_details["user"],
-            password=db_details["password"],
-            host=db_details["host"],
-            port=db_details["port"]
-        )
-        cur = conn.cursor()
+        conn = None
+        cur = None
 
         try:
-            # SQL-Abfrage für die Subtypen
-            query = 'SELECT "id", "SUBTYP" FROM lwl."LUT_Leerrohr_SubTyp" WHERE "TYP" = %s'
-            cur.execute(query, (selected_typ,))
+            conn = psycopg2.connect(
+                dbname=db_details["dbname"],
+                user=db_details["user"],
+                password=db_details["password"],
+                host=db_details["host"],
+                port=db_details["port"]
+            )
+            cur = conn.cursor()
+
+            # Lade alle Subtypen für Typ + Firma + Farbschema
+            cur.execute("""
+                SELECT "id", "SUBTYP_char"
+                FROM lwl."LUT_Leerrohr_SubTyp"
+                WHERE "FARBSCHEMA" = %s AND "FIRMA" = %s AND "ID_TYP" = %s;
+            """, (farbschema, firma, typ_id))
+
             rows = cur.fetchall()
 
-            # ComboBox leeren und befüllen
-            self.ui.comboBox_leerrohr_typ_2.clear()
             if rows:
+                self.ui.comboBox_leerrohr_typ_2.setEnabled(True)
                 for row in rows:
-                    subtyp_id, subtyp_name = row
-                    self.ui.comboBox_leerrohr_typ_2.addItem(subtyp_name, subtyp_id)
+                    self.ui.comboBox_leerrohr_typ_2.addItem(row[1], row[0])
+
+                # 🚀 Qt-Trick: Damit der erste Wert immer wählbar ist
+                self.ui.comboBox_leerrohr_typ_2.setCurrentIndex(-1)
+                self.ui.comboBox_leerrohr_typ_2.setCurrentIndex(0)
+
+                # 🚀 Direkt das Label für den gewählten Subtyp aktualisieren
+                self.ui.label_gewaehltes_leerrohr_2.setText(self.ui.comboBox_leerrohr_typ_2.currentText())
+
             else:
                 self.ui.comboBox_leerrohr_typ_2.addItem("Keine Subtypen verfügbar")
-
-            # Keine Vorauswahl
-            self.ui.comboBox_leerrohr_typ_2.setCurrentIndex(-1)
 
         except Exception as e:
             self.ui.label_Pruefung.setText(f"Fehler beim Laden der Subtypen: {e}")
             self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
+
         finally:
-            cur.close()
-            conn.close()
-            
+            if cur:
+                cur.close()
+            if conn:
+                conn.close()
+
+        self.ui.comboBox_leerrohr_typ_2.blockSignals(False)
+
     def update_selected_leerrohr_subtyp(self):
-        """Aktualisiert das Label für den gewählten Subtyp und füllt Farbschemata basierend darauf."""
-        if self.ui.comboBox_leerrohr_typ_2.currentIndex() >= 0:
-            subtyp_text = self.ui.comboBox_leerrohr_typ_2.currentText()
+        """Aktualisiert das Label für den gewählten Subtyp."""
+        subtyp_text = self.ui.comboBox_leerrohr_typ_2.currentText()
+        if subtyp_text and self.ui.comboBox_leerrohr_typ_2.currentIndex() >= 0:
             self.ui.label_gewaehltes_leerrohr_2.setText(subtyp_text)
-            
-            # Rufe populate_farbschema auf, nachdem der Subtyp aktualisiert wurde
-            self.populate_farbschema()
         else:
             self.ui.label_gewaehltes_leerrohr_2.clear()
-            self.ui.comboBox_Farbschema.clear()
-            self.ui.comboBox_Farbschema.addItem("Bitte Subtyp wählen")
 
     def get_selected_subtyp_id(self):
         # Prüfe, ob eine Auswahl getroffen wurde
@@ -369,13 +492,17 @@ class LeerrohrVerlegenTool(QDialog):
                 conn.close()
        
     def populate_farbschema(self):
-        """Füllt die ComboBox für Farbschema basierend auf dem gewählten Subtyp."""
+        """Füllt die ComboBox für Farbschema basierend auf der gewählten Firma und Typ."""
+        self.ui.comboBox_Farbschema.blockSignals(True)
         self.ui.comboBox_Farbschema.clear()
+        self.ui.comboBox_Farbschema.setEnabled(False)
 
-        # Hole die ID des ausgewählten Subtyps (id aus LUT_Leerrohr_SubTyp)
-        subtyp_id = self.ui.comboBox_leerrohr_typ_2.currentData()
-        if not subtyp_id:
-            self.ui.comboBox_Farbschema.addItem("Bitte Subtyp wählen")
+        firma = self.ui.comboBox_Firma.currentText().strip()
+        typ_id = self.ui.comboBox_leerrohr_typ.currentData()
+
+        if not firma or not typ_id:
+            self.ui.comboBox_Farbschema.addItem("Bitte Firma wählen")
+            self.ui.comboBox_Farbschema.blockSignals(False)
             return
 
         db_details = self.get_database_connection()
@@ -392,39 +519,54 @@ class LeerrohrVerlegenTool(QDialog):
             )
             cur = conn.cursor()
 
-            # SQL-Abfrage: Hole Farbschemata basierend auf der Subtyp-ID
+            # Lade NUR die Farbschemata für die gewählte Firma & Typ
             cur.execute("""
                 SELECT DISTINCT "FARBSCHEMA"
-                FROM lwl."LUT_Farbe_Rohr"
-                WHERE "SUBTYP" = %s
-            """, (subtyp_id,))  # Verwende die Subtyp-ID
+                FROM lwl."LUT_Leerrohr_SubTyp"
+                WHERE "FIRMA" = %s AND "ID_TYP" = %s
+                ORDER BY "FARBSCHEMA";
+            """, (firma, typ_id))
 
             rows = cur.fetchall()
 
             if rows:
-                for row in rows:
-                    self.ui.comboBox_Farbschema.addItem(row[0])  # Füge Farbschemata hinzu
+                self.ui.comboBox_Farbschema.setEnabled(True)
+                self.ui.comboBox_Farbschema.addItems([row[0] for row in rows])
+
+                # Falls das bisherige Farbschema noch verfügbar ist → beibehalten
+                previous_farbschema = self.ui.comboBox_Farbschema.currentText()
+                if previous_farbschema in [row[0] for row in rows]:
+                    self.ui.comboBox_Farbschema.setCurrentText(previous_farbschema)
+                else:
+                    self.ui.comboBox_Farbschema.setCurrentIndex(0)  # Erstes gültiges setzen
+
             else:
                 self.ui.comboBox_Farbschema.addItem("Keine Farbschemata verfügbar")
-
-            self.ui.comboBox_Farbschema.setCurrentIndex(-1)  # Keine Vorauswahl setzen
 
         except Exception as e:
             self.ui.label_Pruefung.setText(f"Fehler beim Laden der Farbschemata: {e}")
             self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
+
         finally:
             if cur:
                 cur.close()
             if conn:
                 conn.close()
 
-    def populate_firma(self):
-        """Füllt die ComboBox für Firma basierend auf dem gewählten Farbschema."""
-        self.ui.comboBox_Firma.clear()
-        farbschema = self.ui.comboBox_Farbschema.currentText().strip()
+        self.ui.comboBox_Farbschema.blockSignals(False)
+        self.populate_leerrohr_subtypen()  # Direkt Subtypen neu laden
 
-        if not farbschema or farbschema == "Keine Farbschemata verfügbar":
-            self.ui.comboBox_Firma.addItem("Bitte Farbschema wählen")
+    def populate_firma(self):
+        """Füllt die ComboBox für Firma basierend auf dem gewählten Leerrohrtyp."""
+        self.ui.comboBox_Firma.blockSignals(True)
+        self.ui.comboBox_Firma.clear()
+        self.ui.comboBox_Firma.setEnabled(False)
+
+        typ_id = self.ui.comboBox_leerrohr_typ.currentData()
+
+        if not typ_id:
+            self.ui.comboBox_Firma.addItem("Bitte Typ wählen")
+            self.ui.comboBox_Firma.blockSignals(False)
             return
 
         db_details = self.get_database_connection()
@@ -441,32 +583,40 @@ class LeerrohrVerlegenTool(QDialog):
             )
             cur = conn.cursor()
 
-            # SQL-Abfrage für Firmen
+            # Lade alle Firmen für den gewählten Typ
             cur.execute("""
                 SELECT DISTINCT "FIRMA"
-                FROM lwl."LUT_Farbe_Rohr"
-                WHERE "FARBSCHEMA" = %s
-            """, (farbschema,))
+                FROM lwl."LUT_Leerrohr_SubTyp"
+                WHERE "ID_TYP" = %s
+                ORDER BY "FIRMA";
+            """, (typ_id,))
 
             rows = cur.fetchall()
 
             if rows:
-                for row in rows:
-                    self.ui.comboBox_Firma.addItem(row[0])
-            else:
-                self.ui.comboBox_Firma.addItem("Keine Firmen verfügbar")
+                self.ui.comboBox_Firma.setEnabled(True)
+                self.ui.comboBox_Firma.addItems([row[0] for row in rows])
 
-            self.ui.comboBox_Firma.setCurrentIndex(-1)
+                # Falls nur eine Firma verfügbar ist → direkt setzen
+                if len(rows) == 1:
+                    self.ui.comboBox_Firma.setCurrentIndex(0)
+
+            else:
+                self.ui.comboBox_Firma.addItem("Keine Firma verfügbar")
 
         except Exception as e:
             self.ui.label_Pruefung.setText(f"Fehler beim Laden der Firmen: {e}")
             self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
+
         finally:
             if cur:
                 cur.close()
             if conn:
                 conn.close()
-                
+
+        self.ui.comboBox_Firma.blockSignals(False)
+        self.populate_farbschema()  # Direkt Farbschema neu laden
+
     def update_selected_leerrohr_typ(self):
         if self.ui.comboBox_leerrohr_typ.currentIndex() >= 0:
             typ_text = self.ui.comboBox_leerrohr_typ.currentText()
@@ -475,16 +625,18 @@ class LeerrohrVerlegenTool(QDialog):
             self.ui.label_gewaehltes_leerrohr.clear()
 
     def update_selected_leerrohr_subtyp(self):
-        """Aktualisiert das Label für den gewählten Subtyp und füllt Farbschemata basierend darauf."""
+        """Aktualisiert das Label für den gewählten Subtyp, ohne das Farbschema zu überschreiben."""
         subtyp_text = self.ui.comboBox_leerrohr_typ_2.currentText()
+
         if subtyp_text and self.ui.comboBox_leerrohr_typ_2.currentIndex() >= 0:
             self.ui.label_gewaehltes_leerrohr_2.setText(subtyp_text)
-            self.populate_farbschema()  # Aktualisiere Farbschemata sofort
+
+            # 🚨 Entferne den automatischen Aufruf von populate_farbschema()
+            # Die Farbschemata dürfen nicht neu geladen werden, wenn nur der Subtyp wechselt.
         else:
             self.ui.label_gewaehltes_leerrohr_2.clear()
             self.ui.comboBox_Farbschema.clear()
-            self.ui.comboBox_Farbschema.addItem("Bitte Subtyp wählen")  # Setze Standardwert
-
+            self.ui.comboBox_Farbschema.addItem("Bitte Subtyp wählen")
 
     def activate_trasse_selection(self):
         # Setze das Label zurück
@@ -677,17 +829,24 @@ class LeerrohrVerlegenTool(QDialog):
             cur = conn.cursor()
             conn.autocommit = False
 
-            # Daten aus den Formularfeldern abrufen
+            # Prüfen, ob alle Pflichtfelder ausgefüllt sind
             trassen_ids_pg_array = "{" + ",".join(map(str, set(self.selected_trasse_ids))) + "}"  # Doppelte Trassen entfernen
-            verbundnummer = self.ui.comboBox_Verbundnummer.currentText() or None
+            verbundnummer = self.ui.comboBox_Verbundnummer.currentText().strip() or None
             kommentar = self.ui.label_Kommentar.text().strip() or None
             beschreibung = self.ui.label_Kommentar_2.text().strip() or None
-            farbschema = self.ui.comboBox_Farbschema.currentText() or None
+            farbschema = self.ui.comboBox_Farbschema.currentText().strip() or None
             firma_hersteller = self.ui.comboBox_Firma.currentText().strip() or None
 
-            # Prüfe, ob mindestens eine Trasse ausgewählt wurde
+            # Subtyp als Nummer aus der ComboBox ermitteln
+            subtyp_id = self.ui.comboBox_leerrohr_typ_2.currentData()
+            if subtyp_id is None or subtyp_id == -1:
+                self.ui.label_Pruefung.setText("❌ Kein gültiger Subtyp ausgewählt!")
+                self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
+                return
+
+            # Prüfen, ob mindestens eine Trasse ausgewählt wurde
             if not self.selected_trasse_ids:
-                self.ui.label_Pruefung.setText("Keine Trassen ausgewählt.")
+                self.ui.label_Pruefung.setText("❌ Keine Trassen ausgewählt.")
                 self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
                 return
 
@@ -701,7 +860,7 @@ class LeerrohrVerlegenTool(QDialog):
 
             # Prüfe, ob alle Trassen eine gültige Geometrie haben
             if not trassen_geometrien or len(trassen_geometrien) != len(self.selected_trasse_ids):
-                self.ui.label_Pruefung.setText("Fehler: Nicht alle Trassen haben gültige Geometrien.")
+                self.ui.label_Pruefung.setText("❌ Fehler: Nicht alle Trassen haben gültige Geometrien.")
                 self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
                 return
 
@@ -710,11 +869,11 @@ class LeerrohrVerlegenTool(QDialog):
             cur.execute(f"SELECT ST_AsText(ST_LineMerge(ST_Union(ARRAY[{geometrien_wkt}])))")
             verbundene_geometrie = cur.fetchone()[0]
 
-            # Speichere die verbundene Geometrie als Offset-Linie
+            # Erzeuge eine Offset-Linie basierend auf dem ursprünglichen Verlauf
             cur.execute(f"SELECT ST_AsText(ST_OffsetCurve(ST_GeomFromText('{verbundene_geometrie}', 31254), 1.0))")
             offset_geometrie = cur.fetchone()[0]
 
-            # Speichere die finalisierte Linie in die Datenbank
+            # Einfügen der Daten in die Datenbank
             insert_query = """
             INSERT INTO lwl."LWL_Leerrohr" (
                 "ID_TRASSE", "TYP", "SUBTYP", "GEFOERDERT", "SUBDUCT", "VERBUNDNUMMER", 
@@ -724,8 +883,8 @@ class LeerrohrVerlegenTool(QDialog):
 
             cur.execute(insert_query, (
                 trassen_ids_pg_array,
-                self.ui.comboBox_leerrohr_typ.currentData(),
-                self.ui.comboBox_leerrohr_typ_2.currentData(),
+                self.ui.comboBox_leerrohr_typ.currentData(),  # TYP
+                subtyp_id,                                  # SUBTYP (als Nummer)
                 'TRUE' if self.ui.comboBox_Gefoerdert.currentText() == "Ja" else 'FALSE',
                 'TRUE' if self.ui.comboBox_Subduct.currentText() == "Ja" else 'FALSE',
                 verbundnummer,
@@ -735,15 +894,15 @@ class LeerrohrVerlegenTool(QDialog):
                 farbschema,
                 firma_hersteller,
                 self.selected_verteiler,
-                offset_geometrie  # Verbundene und offsetierte Geometrie wird gespeichert
+                offset_geometrie
             ))
 
             conn.commit()
             self.iface.messageBar().pushMessage("Erfolg", "Daten erfolgreich importiert.", level=Qgis.Success)
 
-            # Prüfe, ob Mehrfachimport aktiv ist
+            # Falls Mehrfachimport aktiv ist, automatische Anpassung der Verbundnummer
             if self.ui.checkBox_clearForm.isChecked():
-                if verbundnummer is not None and verbundnummer.isdigit():
+                if verbundnummer and verbundnummer.isdigit():
                     neue_verbundnummer = int(verbundnummer) + 1
                     if neue_verbundnummer <= 9:
                         self.ui.comboBox_Verbundnummer.setCurrentText(str(neue_verbundnummer))
@@ -759,6 +918,11 @@ class LeerrohrVerlegenTool(QDialog):
         finally:
             if conn:
                 conn.close()
+        
+        # Karte aktualisieren, damit die Daten sofort sichtbar sind
+        layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr")[0]
+        if layer:
+            layer.triggerRepaint()
 
     def initialisiere_formular(self):
         """Initialisiert das gesamte Formular."""
@@ -781,17 +945,13 @@ class LeerrohrVerlegenTool(QDialog):
         self.populate_farbschema()
         self.populate_firma()
 
-        # GroupBox und Checkboxen zurücksetzen
-        self.ui.groupBox_Rohre.setEnabled(False)
-        for child in self.ui.groupBox_Rohre.findChildren(QCheckBox):
-            child.setChecked(False)
-        self.ui.checkBox_Abzweigung.setChecked(False)
+        # Umschalten erfolgt nur noch über die RadioButtons:
+        self.ui.radioButton_Hauptstrang.setChecked(True)
         
         # Sicherstellen, dass alle ComboBoxen leer oder auf Standard stehen
         self.ui.comboBox_Verbundnummer.setCurrentIndex(-1)
         self.ui.comboBox_Farbschema.setCurrentIndex(-1)
         self.ui.pushButton_Import.setEnabled(False)
-
 
     def clear_trasse_selection(self):
                 
