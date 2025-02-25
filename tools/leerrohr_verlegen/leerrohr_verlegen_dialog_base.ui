@@ -37,7 +37,7 @@
    </property>
    <widget class="QWidget" name="tab">
     <attribute name="title">
-     <string>Leerrohr Verlauf</string>
+     <string>Leerrohr Anlage</string>
     </attribute>
     <widget class="QGroupBox" name="groupBox_3">
      <property name="geometry">
@@ -313,53 +313,17 @@
      <property name="title">
       <string>Verlauf Leerrohr / Erfassung Abzweigung</string>
      </property>
-     <widget class="QPushButton" name="pushButton_verlauf">
+     <widget class="QPushButton" name="pushButton_verteiler_2">
       <property name="geometry">
        <rect>
         <x>10</x>
         <y>56</y>
-        <width>84</width>
+        <width>111</width>
         <height>25</height>
        </rect>
       </property>
       <property name="text">
-       <string>Leerrohrverlauf</string>
-      </property>
-     </widget>
-     <widget class="QTextEdit" name="label_verlauf">
-      <property name="geometry">
-       <rect>
-        <x>230</x>
-        <y>56</y>
-        <width>251</width>
-        <height>22</height>
-       </rect>
-      </property>
-     </widget>
-     <widget class="QLabel" name="label_8">
-      <property name="geometry">
-       <rect>
-        <x>130</x>
-        <y>57</y>
-        <width>91</width>
-        <height>20</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>gewählte Trassen:</string>
-      </property>
-     </widget>
-     <widget class="QLabel" name="label_7">
-      <property name="geometry">
-       <rect>
-        <x>124</x>
-        <y>30</y>
-        <width>101</width>
-        <height>20</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>gewählter Verteiler:</string>
+       <string>Verteiler/Knoten</string>
       </property>
      </widget>
      <widget class="QPushButton" name="pushButton_verteiler">
@@ -367,22 +331,12 @@
        <rect>
         <x>10</x>
         <y>25</y>
-        <width>84</width>
+        <width>111</width>
         <height>25</height>
        </rect>
       </property>
       <property name="text">
        <string>Verteiler</string>
-      </property>
-     </widget>
-     <widget class="QTextEdit" name="label_gewaehlter_verteiler">
-      <property name="geometry">
-       <rect>
-        <x>230</x>
-        <y>26</y>
-        <width>251</width>
-        <height>22</height>
-       </rect>
       </property>
      </widget>
      <widget class="QPushButton" name="pushButton_Parent_Leerrohr">
@@ -393,7 +347,7 @@
        <rect>
         <x>10</x>
         <y>87</y>
-        <width>84</width>
+        <width>111</width>
         <height>25</height>
        </rect>
       </property>
@@ -427,50 +381,105 @@
        <string>Knoten Abzweigung</string>
       </property>
      </widget>
-     <widget class="QTextEdit" name="label_Parent_Leerrohr">
-      <property name="geometry">
-       <rect>
-        <x>230</x>
-        <y>87</y>
-        <width>251</width>
-        <height>22</height>
-       </rect>
-      </property>
-     </widget>
-     <widget class="QTextEdit" name="label_Knoten_Abzweigung">
-      <property name="geometry">
-       <rect>
-        <x>230</x>
-        <y>118</y>
-        <width>251</width>
-        <height>22</height>
-       </rect>
-      </property>
-     </widget>
-     <widget class="QLabel" name="label_9">
-      <property name="geometry">
-       <rect>
-        <x>122</x>
-        <y>88</y>
-        <width>101</width>
-        <height>20</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>gewähltes Leerrohr:</string>
-      </property>
-     </widget>
-     <widget class="QLabel" name="label_17">
+     <widget class="QLabel" name="label_gewaehlter_verteiler">
       <property name="geometry">
        <rect>
         <x>130</x>
-        <y>119</y>
-        <width>100</width>
-        <height>20</height>
+        <y>27</y>
+        <width>191</width>
+        <height>22</height>
+       </rect>
+      </property>
+      <property name="autoFillBackground">
+       <bool>false</bool>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">background-color: lightcoral;</string>
+      </property>
+      <property name="inputMethodHints">
+       <set>Qt::ImhNone</set>
+      </property>
+      <property name="frameShape">
+       <enum>QFrame::Box</enum>
+      </property>
+      <property name="frameShadow">
+       <enum>QFrame::Plain</enum>
+      </property>
+      <property name="lineWidth">
+       <number>1</number>
+      </property>
+      <property name="text">
+       <string>Verteiler wählen!</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_Knoten_Abzweigung">
+      <property name="enabled">
+       <bool>false</bool>
+      </property>
+      <property name="geometry">
+       <rect>
+        <x>130</x>
+        <y>120</y>
+        <width>191</width>
+        <height>22</height>
+       </rect>
+      </property>
+      <property name="frameShape">
+       <enum>QFrame::Box</enum>
+      </property>
+      <property name="text">
+       <string>gewählter Knoten:    </string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_Parent_Leerrohr">
+      <property name="enabled">
+       <bool>false</bool>
+      </property>
+      <property name="geometry">
+       <rect>
+        <x>130</x>
+        <y>89</y>
+        <width>191</width>
+        <height>22</height>
+       </rect>
+      </property>
+      <property name="frameShape">
+       <enum>QFrame::Box</enum>
+      </property>
+      <property name="text">
+       <string>gewähltes Leerrohr:   </string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_gewaehlter_verteiler_2">
+      <property name="geometry">
+       <rect>
+        <x>130</x>
+        <y>58</y>
+        <width>191</width>
+        <height>22</height>
+       </rect>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">background-color: lightcoral;</string>
+      </property>
+      <property name="frameShape">
+       <enum>QFrame::Box</enum>
+      </property>
+      <property name="text">
+       <string>Verteiler wählen!</string>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="pushButton_routing">
+      <property name="geometry">
+       <rect>
+        <x>340</x>
+        <y>26</y>
+        <width>111</width>
+        <height>55</height>
        </rect>
       </property>
       <property name="text">
-       <string>gewählter Knoten:</string>
+       <string>Routing</string>
       </property>
      </widget>
     </widget>
@@ -509,16 +518,6 @@
        </rect>
       </property>
      </widget>
-     <widget class="QTextEdit" name="label_gewaehltes_leerrohr">
-      <property name="geometry">
-       <rect>
-        <x>230</x>
-        <y>68</y>
-        <width>251</width>
-        <height>22</height>
-       </rect>
-      </property>
-     </widget>
      <widget class="QLabel" name="label_6">
       <property name="geometry">
        <rect>
@@ -538,16 +537,6 @@
         <x>10</x>
         <y>160</y>
         <width>181</width>
-        <height>22</height>
-       </rect>
-      </property>
-     </widget>
-     <widget class="QTextEdit" name="label_gewaehltes_leerrohr_2">
-      <property name="geometry">
-       <rect>
-        <x>230</x>
-        <y>160</y>
-        <width>251</width>
         <height>22</height>
        </rect>
       </property>
@@ -665,6 +654,38 @@
        <string>Firma:</string>
       </property>
      </widget>
+     <widget class="QLabel" name="label_gewaehltes_leerrohr">
+      <property name="geometry">
+       <rect>
+        <x>230</x>
+        <y>70</y>
+        <width>241</width>
+        <height>22</height>
+       </rect>
+      </property>
+      <property name="frameShape">
+       <enum>QFrame::Box</enum>
+      </property>
+      <property name="text">
+       <string>Gewählter Typ</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_gewaehltes_leerrohr_2">
+      <property name="geometry">
+       <rect>
+        <x>230</x>
+        <y>160</y>
+        <width>241</width>
+        <height>22</height>
+       </rect>
+      </property>
+      <property name="frameShape">
+       <enum>QFrame::Box</enum>
+      </property>
+      <property name="text">
+       <string>Gewählter Sub-Typ</string>
+      </property>
+     </widget>
     </widget>
     <widget class="QCheckBox" name="checkBox_clearForm">
      <property name="geometry">
@@ -686,6 +707,11 @@
     <zorder>groupBox_4</zorder>
     <zorder>pushButton_Import</zorder>
     <zorder>checkBox_clearForm</zorder>
+   </widget>
+   <widget class="QWidget" name="tab_2">
+    <attribute name="title">
+     <string>Leerrohr Verwaltung</string>
+    </attribute>
    </widget>
   </widget>
  </widget>

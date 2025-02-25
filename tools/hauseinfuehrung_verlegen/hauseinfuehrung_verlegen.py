@@ -168,7 +168,7 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.ui.pushButton_parentLeerrohr.setEnabled(not self.direktmodus)
         
     def verteilerkasten_waehlen(self):
-        """Ermöglicht die Auswahl eines Verteilerkastens aus der Karte mit visuellem Auswahlwerkzeug."""
+        """Ermöglicht die Auswahl eines Verteilerkastens, einer Ortszentrale oder eines Schachts aus der Karte mit visuellem Auswahlwerkzeug."""
         layer = QgsProject.instance().mapLayersByName("LWL_Knoten")[0]
         if not layer:
             self.iface.messageBar().pushMessage("Fehler", "Layer 'LWL_Knoten' nicht gefunden.", level=Qgis.Critical)
@@ -176,7 +176,7 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
 
         # Aktiviere den Layer
         self.iface.setActiveLayer(layer)
-        self.iface.messageBar().pushMessage("Info", "Bitte klicken Sie auf einen Verteilerkasten, um ihn auszuwählen.", level=Qgis.Info)
+        self.iface.messageBar().pushMessage("Info", "Bitte klicken Sie auf ein Objekt (Verteilerkasten, Ortszentrale oder Schacht), um es auszuwählen.", level=Qgis.Info)
 
         # Auswahlwerkzeug vorbereiten
         self.map_tool = QgsMapToolEmitPoint(self.iface.mapCanvas())
@@ -196,12 +196,12 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
                 features = [feature for feature in layer.getFeatures(request)]
 
                 for feature in features:
-                    if feature["TYP"] == "Verteilerkasten":
+                    if feature["TYP"] in ["Verteilerkasten", "Ortszentrale", "Schacht"]:
                         verteiler_id = feature["id"]
 
                         # Aktualisiere UI und speichere die Auswahl
                         self.gewaehlter_verteiler = verteiler_id
-                        self.ui.label_verteiler.setText(f"Verteilerkasten ID: {verteiler_id}")
+                        self.ui.label_verteiler.setText(f"Ausgewählt: {feature['TYP']} (ID: {verteiler_id})")
 
                         # Felder und Ansicht zurücksetzen
                         self.formular_initialisieren_fuer_verteilerwechsel()
@@ -211,10 +211,10 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
                         self.highlight_geometry(geom, layer)
                         return
 
-                self.iface.messageBar().pushMessage("Fehler", "Kein Verteilerkasten an dieser Stelle gefunden.", level=Qgis.Info)
+                self.iface.messageBar().pushMessage("Fehler", "Kein gültiges Objekt (Verteilerkasten, Ortszentrale oder Schacht) an dieser Stelle gefunden.", level=Qgis.Info)
 
             except Exception as e:
-                self.iface.messageBar().pushMessage("Fehler", f"Fehler bei der Verteilerkasten-Auswahl: {e}", level=Qgis.Info)
+                self.iface.messageBar().pushMessage("Fehler", f"Fehler bei der Auswahl: {e}", level=Qgis.Info)
 
         self.map_tool.canvasClicked.connect(on_vertex_selected)
         self.iface.mapCanvas().setMapTool(self.map_tool)

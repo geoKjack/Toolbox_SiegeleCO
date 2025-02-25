@@ -1,11 +1,12 @@
 import logging
-from qgis.core import QgsProject, QgsDataSourceUri, Qgis, QgsGeometry, QgsFeatureRequest, QgsMessageLog
+from qgis.core import QgsVectorLayer, QgsFeature, QgsProject, QgsDataSourceUri, Qgis, QgsGeometry, QgsFeatureRequest, QgsMessageLog
 from qgis.gui import QgsMapToolEmitPoint
-from qgis.PyQt.QtWidgets import QDialog, QDialogButtonBox, QCheckBox
+from qgis.PyQt.QtWidgets import QDialog, QDialogButtonBox, QCheckBox, QMessageBox
 from qgis.PyQt.QtCore import Qt
 from .leerrohr_verlegen_dialog import Ui_LeerrohrVerlegungsToolDialogBase
 from qgis.PyQt.QtSql import QSqlDatabase, QSqlQuery
 from qgis.gui import QgsHighlight
+from qgis.PyQt.QtGui import QColor
 import psycopg2
 
 # Logging konfigurieren
@@ -13,22 +14,30 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 class LeerrohrVerlegenTool(QDialog):
     def __init__(self, iface, parent=None):
+        print("DEBUG: Tool initialisiert")
         super().__init__(parent)
         self.iface = iface
         self.ui = Ui_LeerrohrVerlegungsToolDialogBase()
         self.ui.setupUi(self)
         self.setWindowFlag(Qt.WindowStaysOnTopHint)
 
-        # Initialisiere self.selected_verteiler
+        # **Variablen für die gewählten Objekte**
         self.selected_verteiler = None
-        self.selected_parent_leerrohr = None 
+        self.selected_verteiler_2 = None
+        self.selected_parent_leerrohr = None
+        self.selected_knoten_abzweigung = None
 
-        # **Verknüpfe Buttons**
-        self.ui.pushButton_verlauf.clicked.connect(self.activate_trasse_selection)
+        # **Verknüpfe Buttons mit bestehenden Methoden**
+        self.ui.pushButton_verteiler.clicked.connect(self.select_verteiler)
+        self.ui.pushButton_verteiler_2.clicked.connect(self.select_verteiler_2)
+        self.ui.pushButton_Parent_Leerrohr.clicked.connect(self.select_parent_leerrohr)
+        self.ui.pushButton_Knoten_Abzweigung.clicked.connect(self.select_knoten_abzweigung)
+        
+        self.ui.pushButton_routing.clicked.connect(self.start_routing)
+
         self.ui.pushButton_Datenpruefung.clicked.connect(self.pruefe_daten)
         self.ui.pushButton_Import.setEnabled(False)
         self.ui.pushButton_Import.clicked.connect(self.importiere_daten)
-        self.ui.pushButton_verteiler.clicked.connect(self.select_verteilerkasten)
 
         # **Reset & Cancel Buttons**
         reset_button = self.ui.button_box.button(QDialogButtonBox.Reset)
@@ -42,7 +51,8 @@ class LeerrohrVerlegenTool(QDialog):
         self.map_tool = None
         self.selected_trasse_ids = []
         self.trasse_highlights = []
-        self.verteiler_highlight = None
+        self.verteiler_highlight_1 = None
+        self.verteiler_highlight_2 = None
 
         # **Radiobuttons für Verlegungsmodus**
         self.ui.radioButton_Hauptstrang.toggled.connect(self.update_verlegungsmodus)
@@ -54,9 +64,9 @@ class LeerrohrVerlegenTool(QDialog):
         self.ui.comboBox_leerrohr_typ_2.currentIndexChanged.connect(self.update_selected_leerrohr_subtyp)
         self.ui.comboBox_leerrohr_typ.currentIndexChanged.connect(self.update_combobox_states)
 
-        # **🚀 NEUE FIXES: Korrekte Reihenfolge für Abhängigkeiten**
-        self.ui.comboBox_Firma.currentIndexChanged.connect(self.populate_farbschema)  # ✅ Firma -> Farbschema aktualisieren
-        self.ui.comboBox_Farbschema.currentIndexChanged.connect(self.populate_leerrohr_subtypen)  # ✅ Farbschema -> Subtypen aktualisieren
+        # **🚀 Korrekte Reihenfolge für Abhängigkeiten**
+        self.ui.comboBox_Firma.currentIndexChanged.connect(self.populate_farbschema)  
+        self.ui.comboBox_Farbschema.currentIndexChanged.connect(self.populate_leerrohr_subtypen)  
         self.ui.comboBox_leerrohr_typ.currentIndexChanged.connect(self.populate_firma)
 
         # **Setze Standardzustand (Firma deaktiviert)**
@@ -65,13 +75,16 @@ class LeerrohrVerlegenTool(QDialog):
         # **Direkte Initialisierung**
         self.populate_leerrohr_typen()
         self.populate_gefoerdert_subduct()
-        self.populate_farbschema()  # ✅ Lädt jetzt, wenn eine Firma gewählt wird
+        self.populate_farbschema()  
+        self.update_verbundnummer_dropdown()  # Ändere auf update_verbundnummer_dropdown, falls vorhanden
 
         # **Erzwinge eine Initialisierung des Verlegungsmodus**
         self.update_verlegungsmodus()
         
+        print(f"DEBUG: Initialer Status von comboBox_Verbundnummer: {self.ui.comboBox_Verbundnummer.currentText()}, Enabled: {self.ui.comboBox_Verbundnummer.isEnabled()}")
+        
         QgsMessageLog.logMessage(str(dir(self.ui)), "Leerrohr-Tool", level=Qgis.Info)
-
+        
     def debug_check(self):
         try:
             print("Prüfe Zugriff auf 'label_gewaehlter_verteiler'")
@@ -125,13 +138,27 @@ class LeerrohrVerlegenTool(QDialog):
                 }
         raise Exception("Keine gültige PostgreSQL-Datenbankverbindung gefunden.")
         
+    def db_execute(self, query):
+        """ Führt eine SQL-Abfrage gegen die PostgreSQL-Datenbank aus und gibt das Ergebnis zurück. """
+        try:
+            db_params = self.get_database_connection()  # Verbindungsdetails holen
+            conn = psycopg2.connect(**db_params)  # Verbindung aufbauen
+            cur = conn.cursor()
+            cur.execute(query)
+            result = cur.fetchall()  # Ergebnis abrufen
+            conn.close()
+            return result
+        except Exception as e:
+            QgsMessageLog.logMessage(f"Fehler bei SQL-Query: {e}", "Leerrohr-Tool", level=Qgis.Critical)
+            return None
+       
     def update_verlegungsmodus(self):
         """Aktiviert oder deaktiviert Felder je nach Auswahl von Hauptstrang/Abzweigung."""
-
+        print("DEBUG: Starte update_verlegungsmodus")
         if self.ui.radioButton_Hauptstrang.isChecked():
             # ✅ Hauptstrang-Modus → Typ & Subtyp aktivieren, Parent & Knoten deaktivieren
-            self.populate_leerrohr_typen()  # ← Typen neu laden!
-            self.populate_leerrohr_subtypen()  # ← Subtypen neu laden!
+            self.populate_leerrohr_typen()
+            self.populate_leerrohr_subtypen()
 
             self.ui.comboBox_leerrohr_typ.setEnabled(True)
             self.ui.comboBox_leerrohr_typ_2.setEnabled(True)
@@ -140,7 +167,8 @@ class LeerrohrVerlegenTool(QDialog):
             self.ui.pushButton_Knoten_Abzweigung.setEnabled(False)   
 
             # Attribute aktivieren
-            self.ui.comboBox_Verbundnummer.setEnabled(True)
+            self.ui.comboBox_Verbundnummer.setEnabled(self.ui.comboBox_leerrohr_typ.currentData() == 3)
+            print(f"DEBUG: Verbundnummer-Status in Hauptstrang-Modus: {self.ui.comboBox_Verbundnummer.isEnabled()}")
             self.ui.comboBox_Farbschema.setEnabled(True)
             self.ui.comboBox_Gefoerdert.setEnabled(True)
             self.ui.comboBox_Subduct.setEnabled(True)
@@ -153,9 +181,9 @@ class LeerrohrVerlegenTool(QDialog):
 
         else:
             # ✅ Abzweigungs-Modus → Typ & Subtyp deaktivieren, Parent & Knoten aktivieren
-            self.ui.comboBox_leerrohr_typ.clear()  # Erst leeren
-            self.ui.comboBox_leerrohr_typ.addItem("Deaktiviert")  # Dann Eintrag hinzufügen
-            self.ui.comboBox_leerrohr_typ.setEnabled(False)  # Danach deaktivieren
+            self.ui.comboBox_leerrohr_typ.clear()
+            self.ui.comboBox_leerrohr_typ.addItem("Deaktiviert")
+            self.ui.comboBox_leerrohr_typ.setEnabled(False)
             
             self.ui.comboBox_leerrohr_typ_2.clear()
             self.ui.comboBox_leerrohr_typ_2.addItem("Deaktiviert")
@@ -164,13 +192,13 @@ class LeerrohrVerlegenTool(QDialog):
             self.ui.pushButton_Parent_Leerrohr.setEnabled(True)  
             self.ui.pushButton_Knoten_Abzweigung.setEnabled(True)  
 
-
             # **Firma ZWANGSWEISE deaktivieren**
             self.ui.comboBox_Firma.clear()  
             self.ui.comboBox_Firma.setEnabled(False)  
 
             # **Attribute deaktivieren, aber Werte aus Parent-Leerrohr übernehmen**
             self.ui.comboBox_Verbundnummer.setEnabled(False)
+            print(f"DEBUG: Verbundnummer-Status in Abzweigungs-Modus: {self.ui.comboBox_Verbundnummer.isEnabled()}")
             self.ui.comboBox_Farbschema.setEnabled(False)
             self.ui.comboBox_Gefoerdert.setEnabled(False)
             self.ui.comboBox_Subduct.setEnabled(False)
@@ -181,9 +209,15 @@ class LeerrohrVerlegenTool(QDialog):
             # Falls Parent-Leerrohr gewählt wurde → Werte übernehmen
             if self.selected_parent_leerrohr:
                 if "VERBUNDNUMMER" in self.selected_parent_leerrohr:
-                    index = self.ui.comboBox_Verbundnummer.findText(str(self.selected_parent_leerrohr["VERBUNDNUMMER"]))
-                    if index != -1:
-                        self.ui.comboBox_Verbundnummer.setCurrentIndex(index)
+                    parent_verbundnummer = self.selected_parent_leerrohr["VERBUNDNUMMER"]
+                    if self.ui.comboBox_leerrohr_typ.currentData() == 3:  # Nur Multi-Rohr
+                        index = self.ui.comboBox_Verbundnummer.findText(str(parent_verbundnummer))
+                        if index != -1:
+                            self.ui.comboBox_Verbundnummer.setCurrentIndex(index)
+                    else:
+                        self.ui.comboBox_Verbundnummer.clear()
+                        self.ui.comboBox_Verbundnummer.addItem("Deaktiviert")
+                        self.ui.comboBox_Verbundnummer.setCurrentIndex(0)
 
                 if "FARBSCHEMA" in self.selected_parent_leerrohr:
                     index = self.ui.comboBox_Farbschema.findText(self.selected_parent_leerrohr["FARBSCHEMA"])
@@ -205,17 +239,17 @@ class LeerrohrVerlegenTool(QDialog):
                 if "VERLEGT_AM" in self.selected_parent_leerrohr:
                     self.ui.mDateTimeEdit_Strecke.setDate(self.selected_parent_leerrohr["VERLEGT_AM"])
 
-    def select_verteilerkasten(self):
-        """Aktiviert das Map-Tool zum Auswählen eines Verteilerkastens."""
+    def select_verteiler(self):
+        """Aktiviert das Map-Tool zum Auswählen des ersten Verteilers/Knotens."""
         self.ui.label_gewaehlter_verteiler.clear()  # Label zurücksetzen
 
         # Aktiviere MapTool zur Auswahl
         self.map_tool = QgsMapToolEmitPoint(self.iface.mapCanvas())
-        self.map_tool.canvasClicked.connect(self.verteilerkasten_selected)
+        self.map_tool.canvasClicked.connect(self.verteiler_selected)
         self.iface.mapCanvas().setMapTool(self.map_tool)
 
-    def verteilerkasten_selected(self, point):
-        """Wird ausgelöst, wenn ein Punkt auf der Karte ausgewählt wird."""
+    def verteiler_selected(self, point):
+        """Speichert den gewählten ersten Verteiler/Knoten in `selected_verteiler`."""
         layer_name = "LWL_Knoten"
         layer = QgsProject.instance().mapLayersByName(layer_name)
         if not layer:
@@ -236,54 +270,261 @@ class LeerrohrVerlegenTool(QDialog):
                 nearest_distance = distance
                 nearest_feature = feature
 
-        # Prüfen, ob der nächste Verteilerkasten innerhalb der Schwelle liegt
         if nearest_feature and nearest_distance <= threshold_distance:
-            verteiler_id = nearest_feature["id"]  # ID des Verteilers
-            self.selected_verteiler = verteiler_id  # Speichere die ID direkt
+            verteiler_id = nearest_feature["id"]  # ID speichern
+            self.selected_verteiler = verteiler_id  
 
-            self.ui.label_gewaehlter_verteiler.setText(f"Verteilerkasten ID: {verteiler_id}")
+            self.ui.label_gewaehlter_verteiler.setText(f"Verteiler/Knoten ID: {verteiler_id}")
             self.ui.label_gewaehlter_verteiler.setStyleSheet("background-color: lightgreen;")
-            self.ui.label_Pruefung.setText("")
-            self.ui.label_Pruefung.setStyleSheet("background-color: white;")            
 
-            # Highlight für den Verteilerkasten setzen
-            if self.verteiler_highlight:
-                self.verteiler_highlight.hide()  # Vorheriges Highlight entfernen
-            self.verteiler_highlight = QgsHighlight(self.iface.mapCanvas(), nearest_feature.geometry(), layer)
-            self.verteiler_highlight.setColor(Qt.red)
-            self.verteiler_highlight.setWidth(5)
-            self.verteiler_highlight.show()
-            self.selected_verteiler = verteiler_id  # Setze die Verteilerkasten-ID
-            QgsMessageLog.logMessage(f"self.selected_verteiler nach Setzen: {self.selected_verteiler}", "ToolBox_SiegeleCo", level=Qgis.Info)
-            
+            # Highlight setzen
+            if self.verteiler_highlight_1:
+                self.verteiler_highlight_1.hide()
+            self.verteiler_highlight_1 = QgsHighlight(self.iface.mapCanvas(), nearest_feature.geometry(), layer)
+            self.verteiler_highlight_1.setColor(Qt.red)
+            self.verteiler_highlight_1.setWidth(5)
+            self.verteiler_highlight_1.show()
+
+            QgsMessageLog.logMessage(f"Erster Knoten gewählt: {self.selected_verteiler}", "Leerrohr-Tool", level=Qgis.Info)
         else:
-            QgsMessageLog.logMessage("Kein Verteilerkasten gefunden oder außerhalb der Schwelle.", "ToolBox_SiegeleCo", level=Qgis.Warning)
-            self.ui.label_Pruefung.setText("Kein Verteilerkasten innerhalb von 20 m gefunden")
-            self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
+            self.ui.label_gewaehlter_verteiler.setText("Kein Knoten innerhalb von 20 m gefunden")
+            self.ui.label_gewaehlter_verteiler.setStyleSheet("background-color: lightcoral;")
 
-        self.populate_verbundnummer()  # Aufruf nur nach erfolgreicher Verteiler-Auswahl
-        # Deaktiviere MapTool
         self.iface.mapCanvas().unsetMapTool(self.map_tool)
         self.map_tool = None
 
+    def select_verteiler_2(self):
+        """Aktiviert das Map-Tool zum Auswählen des zweiten Verteilers/Knotens."""
+        self.ui.label_gewaehlter_verteiler_2.clear()  # Label zurücksetzen
+
+        # Falls das MapTool bereits verbunden ist, zuerst trennen
+        if self.map_tool:
+            try:
+                self.map_tool.canvasClicked.disconnect()
+            except TypeError:
+                pass  # Falls nichts verbunden ist, gibt es keinen Fehler
+
+        # Aktiviere MapTool zur Auswahl
+        self.map_tool = QgsMapToolEmitPoint(self.iface.mapCanvas())
+        self.map_tool.canvasClicked.connect(self.verteiler_2_selected)
+        self.iface.mapCanvas().setMapTool(self.map_tool)
+
+    def verteiler_2_selected(self, point):
+        """Speichert den gewählten zweiten Verteiler/Knoten in `selected_verteiler_2`."""
+        layer_name = "LWL_Knoten"
+        layer = QgsProject.instance().mapLayersByName(layer_name)
+        if not layer:
+            self.ui.label_gewaehlter_verteiler_2.setText("Layer 'LWL_Knoten' nicht gefunden")
+            self.ui.label_gewaehlter_verteiler_2.setStyleSheet("background-color: lightcoral;")
+            return
+        layer = layer[0]
+
+        nearest_feature = None
+        nearest_distance = float("inf")
+        threshold_distance = 20  # Maximale Entfernung in Metern
+
+        for feature in layer.getFeatures():
+            if feature["TYP"] not in ["Verteilerkasten", "Schacht", "Ortszentrale", "Hilfsknoten"]:
+                continue
+            distance = feature.geometry().distance(QgsGeometry.fromPointXY(point))
+            if distance < nearest_distance:
+                nearest_distance = distance
+                nearest_feature = feature
+
+        if nearest_feature and nearest_distance <= threshold_distance:
+            verteiler_id = nearest_feature["id"]  # ID speichern
+            self.selected_verteiler_2 = verteiler_id  
+
+            self.ui.label_gewaehlter_verteiler_2.setText(f"Verteiler/Knoten ID: {verteiler_id}")
+            self.ui.label_gewaehlter_verteiler_2.setStyleSheet("background-color: lightgreen;")
+
+            # Highlight setzen
+            if self.verteiler_highlight_2:
+                self.verteiler_highlight_2.hide()
+            self.verteiler_highlight_2 = QgsHighlight(self.iface.mapCanvas(), nearest_feature.geometry(), layer)
+            self.verteiler_highlight_2.setColor(Qt.red)  # Zweiten Knoten in Blau hervorheben
+            self.verteiler_highlight_2.setWidth(5)
+            self.verteiler_highlight_2.show()
+
+            QgsMessageLog.logMessage(f"Zweiter Knoten gewählt: {self.selected_verteiler_2}", "Leerrohr-Tool", level=Qgis.Info)
+        else:
+            self.ui.label_gewaehlter_verteiler_2.setText("Kein Knoten innerhalb von 20 m gefunden")
+            self.ui.label_gewaehlter_verteiler_2.setStyleSheet("background-color: lightcoral;")
+
+        self.iface.mapCanvas().unsetMapTool(self.map_tool)
+        self.map_tool = None
+        
+    def start_routing(self):
+        """Startet das Routing und hebt die berechnete Route hervor."""
+        print(f"DEBUG: Starte Routing – selected_verteiler: {self.selected_verteiler}, selected_verteiler_2: {self.selected_verteiler_2}")
+
+        # Vorherige Route löschen (falls vorhanden)
+        if hasattr(self, "route_highlights") and self.route_highlights:
+            for highlight in self.route_highlights:
+                highlight.setVisible(False)
+            self.route_highlights.clear()
+
+        print(f"DEBUG: Anzahl der Route-Highlights NACH Entfernung: {len(self.route_highlights) if hasattr(self, 'route_highlights') else 'Nicht definiert'}")
+
+        # 1️⃣ Start- und Endknoten aus den gespeicherten Variablen auslesen
+        start_id = self.selected_verteiler  # Startpunkt
+        end_id = self.selected_verteiler_2  # Endpunkt
+
+        # Prüfen, ob Werte vorhanden sind
+        if not start_id or not end_id:
+            self.ui.label_Pruefung.setText("Bitte Start- und Endknoten auswählen!")
+            self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral; color: white; font-weight: bold; padding: 5px;")
+            return
+
+        try:
+            start_id = int(start_id)
+            end_id = int(end_id)
+        except ValueError:
+            self.ui.label_Pruefung.setText("Knoten-IDs müssen Zahlen sein!")
+            self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral; color: white; font-weight: bold; padding: 5px;")
+            return
+
+        # 2️⃣ Routing-SQL-Query definieren
+        sql_query = f"""
+            SELECT id FROM lwl."LWL_Trasse"
+            WHERE id IN (
+                SELECT edge FROM pgr_dijkstra(
+                    'SELECT id, "VONKNOTEN" AS source, "NACHKNOTEN" AS target, "LAENGE" AS cost FROM lwl."LWL_Trasse"',
+                    {start_id}, {end_id},
+                    false
+                )
+            );
+        """
+
+        # 3️⃣ Query ausführen
+        try:
+            result = self.db_execute(sql_query)  
+            print(f"DEBUG: Routing SQL-Abfrage: {sql_query}")
+            print(f"DEBUG: Ergebnis aus Datenbank: {result}")
+
+            if not result:
+                self.ui.label_Pruefung.setText(f"Kein Pfad gefunden!")
+                self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral; color: white; font-weight: bold; padding: 5px;")
+                return
+        except Exception as e:
+            self.ui.label_Pruefung.setText(f"Datenbankfehler: {e}")
+            self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral; color: white; font-weight: bold; padding: 5px;")
+            return
+
+        # 4️⃣ Speichere die Trassen-IDs
+        self.selected_trasse_ids = [row[0] for row in result]  # Speichere die IDs der Trassen aus dem Routing
+        print(f"DEBUG: Nach Routing – selected_trasse_ids: {self.selected_trasse_ids}")
+
+        # 5️⃣ Geometrie verarbeiten und in QGIS hervorheben
+        self.highlight_route(result)
+
+        # 6️⃣ Aktualisiere die Verbundnummern, wenn Multi-Rohr ausgewählt ist und Mehrfachimport aktiviert ist
+        selected_typ = self.ui.comboBox_leerrohr_typ.currentData()
+        if selected_typ == 3 and self.ui.checkBox_clearForm.isChecked():  # Nur für Multi-Rohr und Mehrfachimport
+            print("DEBUG: Mehrfachimport aktiviert – aktualisiere Verbundnummer nach Routing für Multi-Rohr")
+            self.populate_verbundnummer()
+
+        # Erfolgsmeldung setzen
+        self.ui.label_Pruefung.setText("Routing erfolgreich!")
+        self.ui.label_Pruefung.setStyleSheet("background-color: lightgreen; color: black; font-weight: bold; padding: 5px;")
+
+    def clear_routing(self):
+        """Entfernt alle bestehenden Routing-Highlights aus der Karte."""
+        print("DEBUG: Methode clear_routing() wurde aufgerufen!")
+
+        if not hasattr(self, "route_highlights"):
+            self.route_highlights = []
+
+        print(f"DEBUG: Vor dem Entfernen - Anzahl der Routing-Highlights: {len(self.route_highlights)}")
+
+        for highlight in self.route_highlights:
+            highlight.setVisible(False)
+            del highlight
+
+        self.route_highlights.clear()
+        self.route_highlights = []
+
+        print(f"DEBUG: Nach dem Entfernen - Anzahl der Routing-Highlights: {len(self.route_highlights)}")
+
+    def highlight_route(self, result):
+        """Hebt die berechnete Route als Highlight in QGIS hervor."""
+        
+        from qgis.core import QgsProject, QgsFeatureRequest
+        from qgis.gui import QgsHighlight
+        from PyQt5.QtGui import QColor
+
+        print(f"DEBUG: Anzahl der Features im Routing-Ergebnis: {len(result)}")
+
+        # Falls ein vorheriges Highlight existiert, löschen
+        if hasattr(self, "route_highlights") and self.route_highlights:
+            for highlight in self.route_highlights:
+                highlight.setVisible(False)
+            self.route_highlights.clear()
+        
+        # Liste für die neuen Highlights
+        self.route_highlights = []
+
+        # Passenden Layer finden
+        layer_list = QgsProject.instance().mapLayersByName("LWL_Trasse")
+        if not layer_list:
+            print("⚠ Fehler: Der Layer 'LWL_Trasse' wurde nicht gefunden!")
+            return
+
+        trasse_layer = layer_list[0]  # Ersten gefundenen Layer verwenden
+
+        # Alle Trassen aus dem Routing-Ergebnis hervorheben
+        for row in result:
+            trassen_id = row[0]  # ID der gefundenen Trasse
+            print(f"DEBUG: Trassen-ID zum Highlighten: {trassen_id}")
+
+            # Passende Trasse in der Karte suchen
+            request = QgsFeatureRequest().setFilterExpression(f'"id" = {trassen_id}')
+            feature_iter = trasse_layer.getFeatures(request)
+
+            for feature in feature_iter:
+                highlight = QgsHighlight(self.iface.mapCanvas(), feature.geometry(), trasse_layer)
+                highlight.setColor(QColor(255, 0, 0, 150))  # Rote Transparente Markierung
+                highlight.setWidth(10)
+                highlight.show()
+                self.route_highlights.append(highlight)
+
+        # Erfolgsmeldung
+        print(f"DEBUG: {len(self.route_highlights)} Highlights gesetzt")
+
+    def select_parent_leerrohr(self):
+        """Dummy-Methode für den Button Parent-Leerrohr"""
+        QgsMessageLog.logMessage("Parent-Leerrohr Auswahl gedrückt, aber noch nicht implementiert.", "Leerrohr-Tool", level=Qgis.Warning)
+        
+    def select_knoten_abzweigung(self):
+        """Dummy-Methode für den Button Knoten-Abzweigung"""
+        QgsMessageLog.logMessage("Knoten-Abzweigung Auswahl gedrückt, aber noch nicht implementiert.", "Leerrohr-Tool", level=Qgis.Warning)
+
     def update_combobox_states(self):
-        """Aktiviert oder deaktiviert comboBox_Verbundnummer und comboBox_Farbschema basierend auf dem ausgewählten TYP."""
-        selected_typ = self.ui.comboBox_leerrohr_typ.currentData()  # Holt den Wert aus der aktuellen Auswahl
+        """Aktiviert oder deaktiviert comboBox_Verbundnummer und comboBox_Farbschema basierend auf dem ausgewählten TYP, ohne den Inhalt zu überschreiben."""
+        print("DEBUG: Starte update_combobox_states")
+        selected_typ = self.ui.comboBox_leerrohr_typ.currentData()
+        print(f"DEBUG: Ausgewählter Typ in update_combobox_states: {selected_typ}")
+
         if selected_typ == 3:  # Überprüft, ob der TYP 'Multi-Rohr' ist (TYP = 3)
             self.ui.comboBox_Verbundnummer.setEnabled(True)
+            print(f"DEBUG: Verbundnummer aktiviert, da Typ {selected_typ} ist.")
             self.ui.comboBox_Farbschema.setEnabled(True)
             self.ui.comboBox_Firma.setEnabled(True)
         else:
             self.ui.comboBox_Verbundnummer.setEnabled(False)
+            print(f"DEBUG: Verbundnummer deaktiviert, da Typ {selected_typ} nicht 3 ist.")
+            # Überschreibe den Inhalt nur, wenn er nicht bereits "Deaktiviert" enthält
+            if self.ui.comboBox_Verbundnummer.count() == 0 or self.ui.comboBox_Verbundnummer.currentText() != "Deaktiviert":
+                self.ui.comboBox_Verbundnummer.clear()
+                self.ui.comboBox_Verbundnummer.addItem("Deaktiviert")
+                self.ui.comboBox_Verbundnummer.setCurrentIndex(0)
             self.ui.comboBox_Farbschema.setEnabled(False)
-            self.ui.comboBox_Firma.setEnabled(False) 
-            self.ui.comboBox_Verbundnummer.setCurrentIndex(-1)  # Auswahl zurücksetzen
-            self.ui.comboBox_Farbschema.setCurrentIndex(-1)    # Auswahl zurücksetzen
-            self.ui.comboBox_Firma.setCurrentIndex(-1)
+            self.ui.comboBox_Firma.setEnabled(False)
 
     def populate_leerrohr_typen(self):
-        """Füllt die Dropdown-Liste für Leerrohrtypen."""
-        db_details = self.get_database_connection()  # Verbindungsdetails abrufen
+        """Füllt die Dropdown-Liste für Leerrohrtypen mit erweitertem Debugging."""
+        print("DEBUG: Starte populate_leerrohr_typen")
+        db_details = self.get_database_connection()
         conn = psycopg2.connect(
             dbname=db_details["dbname"],
             user=db_details["user"],
@@ -293,33 +534,44 @@ class LeerrohrVerlegenTool(QDialog):
         )
         cur = conn.cursor()
         try:
-            # Datenbankabfrage ausführen
+            print("DEBUG: Führe SQL-Abfrage aus: SELECT \"WERT\", \"TYP\" FROM lwl.\"LUT_Leerrohr_Typ\" WHERE \"WERT\" IN (1, 2, 3)")
             cur.execute('SELECT "WERT", "TYP" FROM lwl."LUT_Leerrohr_Typ" WHERE "WERT" IN (1, 2, 3)')
             rows = cur.fetchall()
 
-            # ComboBox leeren und befüllen
+            print(f"DEBUG: Gefundene Leerrohrtypen aus LUT_Leerrohr_Typ: {rows}")
+
             self.ui.comboBox_leerrohr_typ.clear()
             for row in rows:
                 wert, typ = row
+                print(f"DEBUG: Hinzufügen zu Dropdown – Wert: {wert}, Typ: {typ}")
                 self.ui.comboBox_leerrohr_typ.addItem(typ, wert)
 
-            # Standardmäßig keine Auswahl setzen
+            print(f"DEBUG: Aktueller Index nach Befüllen: {self.ui.comboBox_leerrohr_typ.currentIndex()}")
             self.ui.comboBox_leerrohr_typ.setCurrentIndex(-1)
 
         except Exception as e:
             self.ui.label_Pruefung.setText(f"Fehler beim Abrufen der Leerrohrtypen: {e}")
             self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
+            print(f"DEBUG: Fehler bei der Abfrage der Leerrohrtypen: {e}")
         finally:
+            print("DEBUG: Schließe Datenbankverbindung")
             cur.close()
             conn.close()
-            
+
     def update_selected_leerrohr_typ(self):
-        """Aktualisiert das Label für den gewählten Typ."""
+        """Aktualisiert das Label für den gewählten Typ und ruft populate_verbundnummer auf, unabhängig vom Typ."""
+        print("DEBUG: Starte update_selected_leerrohr_typ")
         if self.ui.comboBox_leerrohr_typ.currentIndex() >= 0:
             typ_text = self.ui.comboBox_leerrohr_typ.currentText()
+            selected_typ = self.ui.comboBox_leerrohr_typ.currentData()
+            print(f"DEBUG: Gewählter Typ – Text: {typ_text}, Data: {selected_typ}")
             self.ui.label_gewaehltes_leerrohr.setText(typ_text)
+            
+            # Rufe populate_verbundnummer immer auf, unabhängig vom Typ
+            self.populate_verbundnummer()
         else:
             self.ui.label_gewaehltes_leerrohr.clear()
+            print("DEBUG: Kein Typ ausgewählt, Label geleert")
 
     def populate_leerrohr_subtypen(self):
         """Füllt die ComboBox für Leerrohr-Subtypen basierend auf Typ, Farbschema und Firma."""
@@ -427,25 +679,44 @@ class LeerrohrVerlegenTool(QDialog):
         self.ui.comboBox_Subduct.setCurrentText("Nein")  # Setze die ComboBox auf "keine Auswahl"
 
     def populate_verbundnummer(self):
-        """Füllt die Dropdown für 'Verbundnummer' mit Werten von 1 bis 9 und deaktiviert bereits verwendete Nummern."""
-        self.ui.comboBox_Verbundnummer.clear()  # Leert die Dropdown-Liste
-        QgsMessageLog.logMessage(f"self.selected_verteiler vor Verwendung in populate_verbundnummer: {self.selected_verteiler}", "ToolBox_SiegeleCo", level=Qgis.Info)
+        """Setzt die Verbundnummer basierend auf dem ausgewählten Rohrtyp, dem Routing (falls vorhanden), und ermöglicht Auswahl mit flexibler Zählung."""
+        print("DEBUG: Starte populate_verbundnummer")
+        self.ui.comboBox_Verbundnummer.clear()
 
+        # 🛑 Überprüfen, ob Multi-Rohr (TYP = 3) oder nicht!
+        selected_typ = self.ui.comboBox_leerrohr_typ.currentData()
+        print(f"DEBUG: Ausgewählter Leerrohrtyp (currentData): {selected_typ}")
+        print(f"DEBUG: Ausgewählter Leerrohrtyp (currentText): {self.ui.comboBox_leerrohr_typ.currentText()}")
+        print(f"DEBUG: Ist Multi-Rohr? {selected_typ == 3}")
+
+        if selected_typ != 3:  
+            # ❌ Kein Multi-Rohr → Zeige "Deaktiviert" im Dropdown
+            print(f"DEBUG: Setze Verbundnummer auf 'Deaktiviert', da Typ {selected_typ} nicht 3 ist.")
+            self.ui.comboBox_Verbundnummer.addItem("Deaktiviert")
+            self.ui.comboBox_Verbundnummer.setCurrentIndex(0)
+            self.ui.comboBox_Verbundnummer.setEnabled(False)
+            return  # ⛔ Methode direkt verlassen!
+
+        # ✅ Multi-Rohr → Berechnung aktivieren
+        self.ui.comboBox_Verbundnummer.setEnabled(True)
+
+        # Prüfe, ob Routing-Daten vorhanden sind
+        if not self.selected_verteiler or not self.selected_trasse_ids:
+            # Wenn keine Routing-Daten vorhanden sind, zeige alle Nummern aktiv an
+            print("DEBUG: Keine Routing-Daten vorhanden, zeige alle Nummern aktiv an")
+            for nummer in range(1, 11):  # Zeige z. B. die Nummern 1–10 aktiv an
+                self.ui.comboBox_Verbundnummer.addItem(str(nummer))
+            self.ui.comboBox_Verbundnummer.setCurrentText("1")  # Setze Standardwert auf 1
+            return
+
+        # Hole die verwendeten Verbundnummern für die aktuelle Route und den Startknoten
         verwendete_nummern = set()
         db_details = self.get_database_connection()
         conn = None
         cur = None
 
         try:
-            if not hasattr(self, 'selected_verteiler') or not self.selected_verteiler:
-                self.ui.label_Pruefung.setText("Kein Verteilerkasten ausgewählt.")
-                self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
-                return
-
-            verteiler_id = self.selected_verteiler  # Direkt die gespeicherte ID verwenden
-            QgsMessageLog.logMessage(f"Starte populate_verbundnummer für Verteilerkasten {verteiler_id}", "ToolBox_SiegeleCo", level=Qgis.Info)
-
-            # Verbindung zur Datenbank herstellen
+            print("DEBUG: Verbinde mit Datenbank")
             conn = psycopg2.connect(
                 dbname=db_details["dbname"],
                 user=db_details["user"],
@@ -455,42 +726,54 @@ class LeerrohrVerlegenTool(QDialog):
             )
             cur = conn.cursor()
 
-            # Alle bereits verwendeten Verbundnummern abrufen
-            cur.execute(f"""
+            trassen_ids_str = "{" + ",".join(map(str, set(self.selected_trasse_ids))) + "}"
+            print(f"DEBUG: SQL-Abfrage für Verbundnummern: SELECT DISTINCT \"VERBUNDNUMMER\" FROM lwl.\"LWL_Leerrohr\" WHERE \"TYP\" = 3 AND (\"VKG_LR\" = {self.selected_verteiler} OR \"ID_TRASSE\" && {trassen_ids_str}::bigint[]) AND \"VERBUNDNUMMER\" IS NOT NULL")
+
+            cur.execute("""
                 SELECT DISTINCT "VERBUNDNUMMER"
                 FROM lwl."LWL_Leerrohr"
-                WHERE "VKG_LR" = %s
-            """, (verteiler_id,))
-            verwendete_nummern = {int(row[0]) for row in cur.fetchall() if row[0] is not None}
-            QgsMessageLog.logMessage(f"Gefundene verwendete Nummern: {verwendete_nummern}", "ToolBox_SiegeleCo", level=Qgis.Info)
+                WHERE "TYP" = 3 
+                AND ("VKG_LR" = %s OR "ID_TRASSE" && %s::bigint[])
+                AND "VERBUNDNUMMER" IS NOT NULL
+            """, (self.selected_verteiler, trassen_ids_str))
 
-            # Alle möglichen Nummern von 1 bis 9 in die Dropdown-Liste einfügen
-            for nummer in range(1, 10):
+            verwendete_nummern = {int(row[0]) for row in cur.fetchall() if row[0] is not None}
+            print(f"DEBUG: Gefundene verwendete Verbundnummern: {verwendete_nummern}")
+
+            # Ermittle die höchste bisher verwendete Nummer, um die Zählung fortzusetzen
+            max_nummer = max(verwendete_nummern) if verwendete_nummern else 0
+            print(f"DEBUG: Maximale Nummer: {max_nummer}")
+
+            # Befülle die ComboBox mit Verbundnummern (startend bei 1, fortlaufend, deaktiviere bereits genutzte Nummern)
+            for nummer in range(1, max_nummer + 11):  # Erlaube 10 zusätzliche Nummern über die höchste hinaus
                 self.ui.comboBox_Verbundnummer.addItem(str(nummer))
                 if nummer in verwendete_nummern:
-                    # Nummer ausgrauen, wenn sie bereits verwendet wurde
                     index = self.ui.comboBox_Verbundnummer.count() - 1
                     item = self.ui.comboBox_Verbundnummer.model().item(index)
                     item.setEnabled(False)
+                    print(f"DEBUG: Nummer {nummer} wurde deaktiviert (bereits verwendet).")
 
-            # Standardmäßig die erste verfügbare Nummer auswählen
-            freie_nummer = next((n for n in range(1, 10) if n not in verwendete_nummern), None)
+            # Automatisch die nächste freie Verbundnummer setzen (die kleinste verfügbare)
+            freie_nummer = next((n for n in range(1, max_nummer + 11) if n not in verwendete_nummern), None)
             if freie_nummer:
                 self.ui.comboBox_Verbundnummer.setCurrentText(str(freie_nummer))
+                print(f"DEBUG: Erste freie Nummer gesetzt: {freie_nummer}")
             else:
-                self.ui.comboBox_Verbundnummer.setCurrentIndex(-1)
+                self.ui.comboBox_Verbundnummer.setCurrentIndex(-1)  # Keine freie Nummer gefunden
+                print("DEBUG: Keine freie Verbundnummer gefunden.")
 
         except Exception as e:
             self.ui.label_Pruefung.setText(f"Fehler beim Abrufen der Verbundnummern: {e}")
             self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
-            QgsMessageLog.logMessage(f"Fehler in populate_verbundnummer: {e}", "ToolBox_SiegeleCo", level=Qgis.Critical)
+            print(f"DEBUG: Fehler bei der Datenbankabfrage: {e}")
 
         finally:
+            print("DEBUG: Schließe Datenbankverbindung")
             if cur:
                 cur.close()
             if conn:
-                conn.close()
-       
+                conn.close()           
+                
     def populate_farbschema(self):
         """Füllt die ComboBox für Farbschema basierend auf der gewählten Firma und Typ."""
         self.ui.comboBox_Farbschema.blockSignals(True)
@@ -617,13 +900,6 @@ class LeerrohrVerlegenTool(QDialog):
         self.ui.comboBox_Firma.blockSignals(False)
         self.populate_farbschema()  # Direkt Farbschema neu laden
 
-    def update_selected_leerrohr_typ(self):
-        if self.ui.comboBox_leerrohr_typ.currentIndex() >= 0:
-            typ_text = self.ui.comboBox_leerrohr_typ.currentText()
-            self.ui.label_gewaehltes_leerrohr.setText(typ_text)
-        else:
-            self.ui.label_gewaehltes_leerrohr.clear()
-
     def update_selected_leerrohr_subtyp(self):
         """Aktualisiert das Label für den gewählten Subtyp, ohne das Farbschema zu überschreiben."""
         subtyp_text = self.ui.comboBox_leerrohr_typ_2.currentText()
@@ -654,67 +930,38 @@ class LeerrohrVerlegenTool(QDialog):
         self.map_tool = QgsMapToolEmitPoint(self.iface.mapCanvas())
         self.map_tool.canvasClicked.connect(self.select_trasse)
         self.iface.mapCanvas().setMapTool(self.map_tool)
+            
+    def update_verbundnummer_dropdown(self):
+        """Aktualisiert das Verbundnummer-Dropdown basierend auf dem Leerrohrtyp."""
+        typ_id = self.ui.comboBox_leerrohr_typ.currentData()  # Holt den aktuellen Typ
 
-    def select_trasse(self, point):
-        """Wird ausgelöst, wenn ein Punkt auf der Karte ausgewählt wird."""
-        layer = QgsProject.instance().mapLayersByName("LWL_Trasse")
-        if not layer:
-            self.ui.label_Pruefung.setText("Layer 'LWL_Trasse' nicht gefunden")
-            self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
-            return
-        layer = layer[0]
-
-        nearest_feature = None
-        nearest_distance = float("inf")
-
-        for feature in layer.getFeatures():
-            distance = feature.geometry().distance(QgsGeometry.fromPointXY(point))
-            if distance < nearest_distance:
-                nearest_distance = distance
-                nearest_feature = feature
-
-        if nearest_feature:
-            trasse_id = nearest_feature["id"]
-
-            if trasse_id not in self.selected_trasse_ids:
-                self.selected_trasse_ids.append(trasse_id)
-
-                # Highlight für die Trasse hinzufügen
-                highlight = QgsHighlight(self.iface.mapCanvas(), nearest_feature.geometry(), layer)
-                highlight.setColor(Qt.red)  # Setze rote Farbe
-                highlight.setWidth(5)
-                highlight.show()
-                self.trasse_highlights.append(highlight)
-
-                self.ui.label_verlauf.setText(", ".join(map(str, self.selected_trasse_ids)))
-                self.ui.label_verlauf.setStyleSheet("background-color: lightgreen;")
-            else:
-                self.ui.label_Pruefung.setText(f"Trasse {trasse_id} ist bereits ausgewählt.")
-                self.ui.label_Pruefung.setStyleSheet("background-color: yellow; color: black;")
-
+        if typ_id == 3:  # Multi-Rohr → Verbundnummer wählbar
+            self.ui.comboBox_Verbundnummer.setEnabled(True)
+            self.populate_verbundnummer()  # Verfügbare Nummern abrufen
+        else:
+            # Alle anderen Typen → Deaktiviert anzeigen
+            self.ui.comboBox_Verbundnummer.clear()
+            self.ui.comboBox_Verbundnummer.addItem("Deaktiviert")  
+            self.ui.comboBox_Verbundnummer.setCurrentIndex(0)
+            self.ui.comboBox_Verbundnummer.setEnabled(False)
 
     def pruefe_daten(self):
-        print("DEBUG: Starte pruefe_daten")
-        QgsMessageLog.logMessage(f"self.selected_verteiler in pruefe_daten: {self.selected_verteiler}", "ToolBox_SiegeleCo", level=Qgis.Info)
-        self.debug_check()
-        """Prüft, ob die ausgewählten Trassen einen durchgängigen Verlauf ohne Lücken und Abzweigungen ergeben und ob alle Pflichtfelder ausgefüllt sind."""
+        """Prüft, ob die Pflichtfelder korrekt gefüllt sind und die Daten logisch zusammenpassen."""
         fehler = []
 
-        # Schritt 1: Prüfe, ob die Pflichtfelder gefüllt sind
-        if not self.ui.label_gewaehltes_leerrohr.toPlainText().strip():
-            fehler.append("Kein Leerrohr-Typ ausgewählt.")
-        if not self.ui.label_gewaehltes_leerrohr_2.toPlainText().strip():
-            fehler.append("Kein Leerrohr-Subtyp ausgewählt.")
-            
-        # Schritt 2: Prüfe, ob Trassen ausgewählt wurden
-        if not self.selected_trasse_ids:
-            fehler.append("Keine Trassen ausgewählt.")
+        typ_id = self.ui.comboBox_leerrohr_typ.currentData()  # Holt den aktuellen Leerrohr-Typ
+        verbundnummer = self.ui.comboBox_Verbundnummer.currentText().strip()
 
-        # Schritt 3: Sammeln der Knoteninformationen (nur wenn keine Fehler vorliegen)
-        if not fehler:
-            knoten_dict = {}  # Speichert die Häufigkeit jedes Knotens
-            trassen_info = []  # Speichert Trasseninformationen (ID, VON, NACH)
+        # ✅ 1. Pflichtfelder für Hauptrohre und Multi-Rohre unterschiedlich behandeln
+        if typ_id == 3 and (not verbundnummer or not verbundnummer.isdigit()):
+            fehler.append("Keine gültige Verbundnummer für Multi-Rohr gewählt.")
+        elif typ_id != 3 and verbundnummer != "Deaktiviert":
+            fehler.append("Verbundnummer muss für Nicht-Multi-Rohre 0 sein.")
 
+        # ✅ 2. Prüfe, ob bereits vergebene Verbundnummer gewählt wurde (nur für Multi-Rohr)
+        vorhandene_verbundnummern = set()
+
+        try:
             db_details = self.get_database_connection()
             conn = psycopg2.connect(
                 dbname=db_details["dbname"],
@@ -724,50 +971,34 @@ class LeerrohrVerlegenTool(QDialog):
                 port=db_details["port"]
             )
             cur = conn.cursor()
-            try:
-                for trasse_id in self.selected_trasse_ids:
-                    cur.execute('SELECT "VONKNOTEN", "NACHKNOTEN" FROM lwl."LWL_Trasse" WHERE "id" = %s', (trasse_id,))
-                    row = cur.fetchone()
-                    if row:
-                        vonknoten, nachknoten = row
-                        trassen_info.append((trasse_id, vonknoten, nachknoten))
 
-                        # Zähle die Häufigkeit der Knoten
-                        for knoten in [vonknoten, nachknoten]:
-                            if knoten in knoten_dict:
-                                knoten_dict[knoten] += 1
-                            else:
-                                knoten_dict[knoten] = 1
-                    else:
-                        fehler.append(f"Fehler beim Abrufen der Knoten für Trasse {trasse_id}.")
-                
-                # Schritt 4: Validierung der Knotenhäufigkeiten
-                if not fehler:
-                    startknoten = [knoten for knoten, count in knoten_dict.items() if count == 1]
-                    mittel_knoten = [knoten for knoten, count in knoten_dict.items() if count == 2]
+            if typ_id == 3:
+                cur.execute("""
+                    SELECT DISTINCT "VERBUNDNUMMER"
+                    FROM lwl."LWL_Leerrohr"
+                    WHERE "TYP" = 3 
+                    AND "VKG_LR" = %s
+                    AND "ID_TRASSE" && %s::bigint[];
+                """, (self.selected_verteiler, "{" + ",".join(map(str, set(self.selected_trasse_ids))) + "}"))
 
-                    if len(startknoten) != 2:  # Es muss genau einen Start- und einen Endknoten geben
-                        fehler.append("Kein durchgängiger Verlauf: Es gibt nicht genau einen Start- und einen Endknoten.")
+                vorhandene_verbundnummern = {int(row[0]) for row in cur.fetchall() if row[0] is not None}
 
-                    if any(count > 2 for count in knoten_dict.values()):  # Kein Knoten darf öfter als zweimal vorkommen
-                        fehler.append("Kein durchgängiger Verlauf: Es gibt Abzweigungen oder Lücken.")
+                if verbundnummer and int(verbundnummer) in vorhandene_verbundnummern:
+                    fehler.append(f"Verbundnummer {verbundnummer} ist bereits vergeben.")
 
-                # Schritt 5: Reihenfolge der Trassen korrigieren
-                geordnete_trassen = []
-                if not fehler:
-                    geordnete_trassen = self.ordne_trassen(trassen_info)
-                if not self.ui.label_gewaehlter_verteiler.toPlainText().strip():
-                    fehler.append("Kein Verteilerkasten ausgewählt.")
-
-
-
-            except Exception as e:
-                fehler.append(f"Datenbankfehler: {e}")
-            finally:
+        except Exception as e:
+            fehler.append(f"Datenbankfehler bei der Verbundnummer-Prüfung: {e}")
+        finally:
+            if 'cur' in locals():
                 cur.close()
+            if 'conn' in locals():
                 conn.close()
 
-        # Schritt 6: Ergebnis anzeigen
+        # ✅ 3. Prüfe, ob mindestens eine Trasse ausgewählt wurde
+        if not self.selected_trasse_ids:
+            fehler.append("Keine Trassen ausgewählt.")
+
+        # ✅ 4. Falls die Prüfung bestanden wurde → Import ermöglichen
         if fehler:
             self.ui.label_Pruefung.setText("; ".join(fehler))
             self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
@@ -829,28 +1060,21 @@ class LeerrohrVerlegenTool(QDialog):
             cur = conn.cursor()
             conn.autocommit = False
 
-            # Prüfen, ob alle Pflichtfelder ausgefüllt sind
-            trassen_ids_pg_array = "{" + ",".join(map(str, set(self.selected_trasse_ids))) + "}"  # Doppelte Trassen entfernen
-            verbundnummer = self.ui.comboBox_Verbundnummer.currentText().strip() or None
+            # 🔹 Daten aus UI-Elementen abrufen
+            trassen_ids_pg_array = "{" + ",".join(map(str, set(self.selected_trasse_ids))) + "}"
+            verbundnummer = self.ui.comboBox_Verbundnummer.currentText().strip()
             kommentar = self.ui.label_Kommentar.text().strip() or None
             beschreibung = self.ui.label_Kommentar_2.text().strip() or None
             farbschema = self.ui.comboBox_Farbschema.currentText().strip() or None
             firma_hersteller = self.ui.comboBox_Firma.currentText().strip() or None
 
-            # Subtyp als Nummer aus der ComboBox ermitteln
-            subtyp_id = self.ui.comboBox_leerrohr_typ_2.currentData()
-            if subtyp_id is None or subtyp_id == -1:
-                self.ui.label_Pruefung.setText("❌ Kein gültiger Subtyp ausgewählt!")
-                self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
-                return
+            # ❌ Falls "Deaktiviert" oder leer, setze Verbundnummer auf 0 für Nicht-Multi-Rohr, sonst behalte den Wert
+            if verbundnummer == "Deaktiviert" or not verbundnummer:
+                verbundnummer = "0" if self.ui.comboBox_leerrohr_typ.currentData() != 3 else None
+            elif not verbundnummer.isdigit():
+                raise ValueError(f"Ungültige Verbundnummer: {verbundnummer}")
 
-            # Prüfen, ob mindestens eine Trasse ausgewählt wurde
-            if not self.selected_trasse_ids:
-                self.ui.label_Pruefung.setText("❌ Keine Trassen ausgewählt.")
-                self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
-                return
-
-            # Sammle die Geometrien aller ausgewählten Trassen
+            # 🔹 Sammle Geometrien aller Trassen
             cur.execute("""
                 SELECT "id", ST_AsText("geom")
                 FROM lwl."LWL_Trasse"
@@ -858,22 +1082,18 @@ class LeerrohrVerlegenTool(QDialog):
             """, (self.selected_trasse_ids,))
             trassen_geometrien = cur.fetchall()
 
-            # Prüfe, ob alle Trassen eine gültige Geometrie haben
+            # 🔹 Falls keine gültigen Geometrien → Fehler
             if not trassen_geometrien or len(trassen_geometrien) != len(self.selected_trasse_ids):
                 self.ui.label_Pruefung.setText("❌ Fehler: Nicht alle Trassen haben gültige Geometrien.")
                 self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
                 return
 
-            # Verbinde die Geometrien zu einer einzigen Linie
+            # 🔹 Verbinde Geometrien zu einer einzigen Linie
             geometrien_wkt = ", ".join([f"ST_GeomFromText('{geom[1]}', 31254)" for geom in trassen_geometrien])
             cur.execute(f"SELECT ST_AsText(ST_LineMerge(ST_Union(ARRAY[{geometrien_wkt}])))")
             verbundene_geometrie = cur.fetchone()[0]
 
-            # Erzeuge eine Offset-Linie basierend auf dem ursprünglichen Verlauf
-            cur.execute(f"SELECT ST_AsText(ST_OffsetCurve(ST_GeomFromText('{verbundene_geometrie}', 31254), 1.0))")
-            offset_geometrie = cur.fetchone()[0]
-
-            # Einfügen der Daten in die Datenbank
+            # 🔹 Einfügen der Daten in die Datenbank
             insert_query = """
             INSERT INTO lwl."LWL_Leerrohr" (
                 "ID_TRASSE", "TYP", "SUBTYP", "GEFOERDERT", "SUBDUCT", "VERBUNDNUMMER", 
@@ -883,108 +1103,137 @@ class LeerrohrVerlegenTool(QDialog):
 
             cur.execute(insert_query, (
                 trassen_ids_pg_array,
-                self.ui.comboBox_leerrohr_typ.currentData(),  # TYP
-                subtyp_id,                                  # SUBTYP (als Nummer)
+                self.ui.comboBox_leerrohr_typ.currentData(),
+                self.ui.comboBox_leerrohr_typ_2.currentData(),
                 'TRUE' if self.ui.comboBox_Gefoerdert.currentText() == "Ja" else 'FALSE',
                 'TRUE' if self.ui.comboBox_Subduct.currentText() == "Ja" else 'FALSE',
-                verbundnummer,
+                verbundnummer,  # 🔹 Falls None oder "Deaktiviert" → 0 für Nicht-Multi-Rohr
                 kommentar,
                 beschreibung,
                 self.ui.mDateTimeEdit_Strecke.date().toString("yyyy-MM-dd"),
                 farbschema,
                 firma_hersteller,
                 self.selected_verteiler,
-                offset_geometrie
+                verbundene_geometrie
             ))
 
             conn.commit()
             self.iface.messageBar().pushMessage("Erfolg", "Daten erfolgreich importiert.", level=Qgis.Success)
 
-            # Falls Mehrfachimport aktiv ist, automatische Anpassung der Verbundnummer
-            if self.ui.checkBox_clearForm.isChecked():
-                if verbundnummer and verbundnummer.isdigit():
-                    neue_verbundnummer = int(verbundnummer) + 1
-                    if neue_verbundnummer <= 9:
-                        self.ui.comboBox_Verbundnummer.setCurrentText(str(neue_verbundnummer))
-                    else:
-                        self.ui.comboBox_Verbundnummer.setCurrentIndex(-1)
-            else:
-                self.initialisiere_formular()
+            # 🔹 Formular zurücksetzen basierend auf Mehrfachimport-Checkbox
+            self.initialisiere_formular()
 
         except Exception as e:
             if conn:
                 conn.rollback()
             self.iface.messageBar().pushMessage("Fehler", f"Import fehlgeschlagen: {str(e)}", level=Qgis.Critical)
+
         finally:
             if conn:
                 conn.close()
-        
-        # Karte aktualisieren, damit die Daten sofort sichtbar sind
+
+        # 🔹 Karte aktualisieren, damit neue Daten sichtbar sind
         layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr")[0]
         if layer:
             layer.triggerRepaint()
 
     def initialisiere_formular(self):
-        """Initialisiert das gesamte Formular."""
-        self.clear_trasse_selection()
+        """Setzt das Formular zurück, entfernt vorhandene Highlights, es sei denn, Mehrfachimport ist aktiviert."""
+        print("DEBUG: Starte initialisiere_formular")
 
-        if self.verteiler_highlight:
-            self.verteiler_highlight.hide()
-            self.verteiler_highlight = None
+        # Prüfe, ob Mehrfachimport aktiviert ist
+        if not self.ui.checkBox_clearForm.isChecked():
+            # 1️⃣ Debug-Ausgabe: Vor dem Entfernen der Highlights
+            if hasattr(self, "route_highlights"):
+                print(f"DEBUG: Anzahl der Highlights VOR Reset: {len(self.route_highlights)}")
+            
+            # 2️⃣ Alle Variablen und UI-Elemente zurücksetzen
+            self.selected_verteiler = None
+            self.selected_verteiler_2 = None
 
-        self.ui.label_gewaehlter_verteiler.setText("Kein Verteiler ausgewählt")
-        self.ui.label_gewaehlter_verteiler.setStyleSheet("background-color: lightcoral;")
-        from PyQt5.QtCore import QDate
-        self.ui.mDateTimeEdit_Strecke.setDate(QDate.currentDate())
+            self.ui.label_gewaehlter_verteiler.setText("Verteiler wählen!")
+            self.ui.label_gewaehlter_verteiler.setStyleSheet("background-color: lightcoral;")
+            self.ui.label_gewaehlter_verteiler_2.setText("Verteiler wählen!")
+            self.ui.label_gewaehlter_verteiler_2.setStyleSheet("background-color: lightcoral;")
 
-        # Dropdowns und Checkboxen initialisieren
-        self.populate_leerrohr_typen()
-        self.populate_leerrohr_subtypen()
-        self.populate_gefoerdert_subduct()
-        self.populate_verbundnummer()
-        self.populate_farbschema()
-        self.populate_firma()
+            self.ui.comboBox_Verbundnummer.setCurrentIndex(-1)
+            self.ui.pushButton_Import.setEnabled(False)
 
-        # Umschalten erfolgt nur noch über die RadioButtons:
-        self.ui.radioButton_Hauptstrang.setChecked(True)
-        
-        # Sicherstellen, dass alle ComboBoxen leer oder auf Standard stehen
-        self.ui.comboBox_Verbundnummer.setCurrentIndex(-1)
-        self.ui.comboBox_Farbschema.setCurrentIndex(-1)
-        self.ui.pushButton_Import.setEnabled(False)
+            # 3️⃣ Routing-Highlights und andere Highlights entfernen
+            self.clear_routing()
+
+            # 4️⃣ Entferne Highlights für Verteiler
+            if hasattr(self, "verteiler_highlight_1") and self.verteiler_highlight_1:
+                self.verteiler_highlight_1.hide()
+                self.verteiler_highlight_1 = None
+
+            if hasattr(self, "verteiler_highlight_2") and self.verteiler_highlight_2:
+                self.verteiler_highlight_2.hide()
+                self.verteiler_highlight_2 = None
+
+            self.ui.label_Pruefung.clear()
+            self.ui.label_Pruefung.setStyleSheet("")
+
+            self.ui.comboBox_Gefoerdert.setCurrentIndex(-1)
+            self.ui.comboBox_Subduct.setCurrentIndex(-1)
+
+            # 5️⃣ Debug-Ausgabe: Nach dem Entfernen
+            if hasattr(self, "route_highlights"):
+                print(f"DEBUG: Anzahl der Highlights NACH Reset: {len(self.route_highlights)}")
+
+            print("DEBUG: Formular wurde erfolgreich zurückgesetzt.")
+        else:
+            # 1️⃣ Bei aktiviertem Mehrfachimport: Nur Verbundnummer aktualisieren, wenn Multi-Rohr ausgewählt ist
+            selected_typ = self.ui.comboBox_leerrohr_typ.currentData()
+            if selected_typ == 3:  # Nur für Multi-Rohr
+                print("DEBUG: Mehrfachimport aktiviert – aktualisiere Verbundnummer für Multi-Rohr")
+                self.populate_verbundnummer()
+            else:
+                print("DEBUG: Mehrfachimport aktiviert, aber kein Multi-Rohr – keine Änderungen")
+
+            # 2️⃣ Highlights und andere UI-Elemente unverändert lassen
+            self.ui.pushButton_Import.setEnabled(True)  # Import bleibt aktiviert für weitere Imports
 
     def clear_trasse_selection(self):
                 
         # Setze Default-Werte für Label und Felder
-        self.ui.label_gewaehlter_verteiler.setText("")
+        self.ui.label_gewaehlter_verteiler.setText("Verteiler wählen!")
         self.ui.label_gewaehlter_verteiler.setStyleSheet("background-color: lightcoral;")
+        
+        self.ui.label_gewaehlter_verteiler_2.setText("Verteiler wählen!")
+        self.ui.label_gewaehlter_verteiler_2.setStyleSheet("background-color: lightcoral;")
         
         self.ui.label_Kommentar.setText("")
         self.ui.label_Kommentar_2.setText("")
         
-        """Setzt alle Felder und Highlights für Trassen zurück."""
-        for highlight in self.trasse_highlights:
-            highlight.hide()
-            
+        self.selected_verteiler = None  # Sicherstellen, dass der Wert zurückgesetzt wird
+        self.selected_verteiler_2 = None  # Sicherstellen, dass der Wert zurückgesetzt wird
+                    
         # Entferne das Highlight für den Verteilerkasten
-        if self.verteiler_highlight:
-            self.verteiler_highlight.hide()
-            self.verteiler_highlight = None
+        if hasattr(self, "verteiler_highlight_1") and self.verteiler_highlight_1:
+            self.verteiler_highlight_1.hide()
+            self.verteiler_highlight_1 = None
 
-        self.trasse_highlights.clear()
-        self.selected_trasse_ids.clear()
+        if hasattr(self, "verteiler_highlight_2") and self.verteiler_highlight_2:
+            self.verteiler_highlight_2.hide()
+            self.verteiler_highlight_2 = None
 
-        self.ui.label_verlauf.clear()
-        self.ui.label_verlauf.setStyleSheet("background-color: lightcoral;")
         self.ui.label_Pruefung.clear()
         self.ui.label_Pruefung.setStyleSheet("")
 
-        self.ui.comboBox_leerrohr_typ.setCurrentIndex(-1)
-        self.ui.comboBox_leerrohr_typ_2.setCurrentIndex(-1)
         self.ui.comboBox_Gefoerdert.setCurrentIndex(-1)
         self.ui.comboBox_Subduct.setCurrentIndex(-1)
         self.ui.comboBox_Verbundnummer.setCurrentIndex(-1)
         self.ui.pushButton_Import.setEnabled(False)
+        
+        # 3️⃣ Routing-Highlights entfernen
+        self.clear_routing()
+
+        # 4️⃣ Debug-Ausgabe: Nach dem Entfernen
+        if hasattr(self, "route_highlights"):
+            print(f"DEBUG: Anzahl der Highlights NACH Reset: {len(self.route_highlights)}")
+
+        print("DEBUG: Formular wurde erfolgreich zurückgesetzt.")
 
     def close_tool(self):
         """Schließt das Tool und löscht alle Highlights."""
