@@ -81,6 +81,9 @@ class LeerrohrVerlegenTool(QDialog):
         # **Erzwinge eine Initialisierung des Verlegungsmodus**
         self.update_verlegungsmodus()
         
+        # Speichert Routen nach path_id für Farben
+        self.routes_by_path_id = {}  
+        
         print(f"DEBUG: Initialer Status von comboBox_Verbundnummer: {self.ui.comboBox_Verbundnummer.currentText()}, Enabled: {self.ui.comboBox_Verbundnummer.isEnabled()}")
         
         QgsMessageLog.logMessage(str(dir(self.ui)), "Leerrohr-Tool", level=Qgis.Info)
@@ -139,17 +142,31 @@ class LeerrohrVerlegenTool(QDialog):
         raise Exception("Keine gültige PostgreSQL-Datenbankverbindung gefunden.")
         
     def db_execute(self, query):
-        """ Führt eine SQL-Abfrage gegen die PostgreSQL-Datenbank aus und gibt das Ergebnis zurück. """
+        """Führt eine SQL-Abfrage gegen die PostgreSQL-Datenbank aus und gibt das Ergebnis zurück."""
         try:
-            db_params = self.get_database_connection()  # Verbindungsdetails holen
-            conn = psycopg2.connect(**db_params)  # Verbindung aufbauen
+            db_params = self.get_database_connection()
+            print(f"DEBUG: Verbindungsparameter: {db_params}")
+            conn = psycopg2.connect(**db_params)
             cur = conn.cursor()
+            print(f"DEBUG: Führe Query aus: {query}")
             cur.execute(query)
-            result = cur.fetchall()  # Ergebnis abrufen
+            result = cur.fetchall()
+            print(f"DEBUG: Ergebnis aus Datenbank: {result}")
             conn.close()
             return result
+        except psycopg2.Error as e:
+            print(f"DEBUG: PostgreSQL-Fehler bei SQL-Query: {e}")
+            print(f"DEBUG: Fehlgeschlagene Query: {query}")
+            QgsMessageLog.logMessage(f"PostgreSQL-Fehler: {e}", "Leerrohr-Tool", level=Qgis.Critical)
+            if conn:
+                conn.close()
+            return None
         except Exception as e:
-            QgsMessageLog.logMessage(f"Fehler bei SQL-Query: {e}", "Leerrohr-Tool", level=Qgis.Critical)
+            print(f"DEBUG: Allgemeiner Fehler bei SQL-Query: {e}")
+            print(f"DEBUG: Fehlgeschlagene Query: {query}")
+            QgsMessageLog.logMessage(f"Allgemeiner Fehler: {e}", "Leerrohr-Tool", level=Qgis.Critical)
+            if conn:
+                conn.close()
             return None
        
     def update_verlegungsmodus(self):
@@ -250,6 +267,10 @@ class LeerrohrVerlegenTool(QDialog):
 
     def verteiler_selected(self, point):
         """Speichert den gewählten ersten Verteiler/Knoten in `selected_verteiler`."""
+        import time
+        start_time = time.time()
+
+        print("DEBUG: Starte Knotenauswahl (Verteiler 1)")
         layer_name = "LWL_Knoten"
         layer = QgsProject.instance().mapLayersByName(layer_name)
         if not layer:
@@ -258,11 +279,22 @@ class LeerrohrVerlegenTool(QDialog):
             return
         layer = layer[0]
 
+        # Berechne die Toleranz in Metern, basierend auf 10 Pixeln und dem aktuellen Maßstab
+        map_scale = self.iface.mapCanvas().scale()
+        dpi = 96  # Standard-DPI (kann angepasst werden, je nach Monitor)
+        meters_per_pixel = map_scale / (39.37 * dpi)  # 39.37 = Zoll pro Meter
+        threshold_distance = 10 * meters_per_pixel  # 10 Pixel als Toleranz, in Metern umgerechnet
+
         nearest_feature = None
         nearest_distance = float("inf")
-        threshold_distance = 20  # Maximale Entfernung in Metern
 
-        for feature in layer.getFeatures():
+        # Erstelle einen räumlichen Filter (Buffer um den Klickpunkt)
+        buffer = QgsGeometry.fromPointXY(point).buffer(threshold_distance, 8)  # 8 Segmente für die Rundung
+        request = QgsFeatureRequest().setFilterRect(buffer.boundingBox())
+
+        feature_count = 0
+        for feature in layer.getFeatures(request):
+            feature_count += 1
             if feature["TYP"] not in ["Verteilerkasten", "Schacht", "Ortszentrale"]:
                 continue
             distance = feature.geometry().distance(QgsGeometry.fromPointXY(point))
@@ -270,14 +302,16 @@ class LeerrohrVerlegenTool(QDialog):
                 nearest_distance = distance
                 nearest_feature = feature
 
+        print(f"DEBUG: Anzahl der Features im Filterbereich: {feature_count}")
+        print(f"DEBUG: Zeit für Knotenauswahl: {time.time() - start_time} Sekunden")
+
         if nearest_feature and nearest_distance <= threshold_distance:
-            verteiler_id = nearest_feature["id"]  # ID speichern
+            verteiler_id = nearest_feature["id"]
             self.selected_verteiler = verteiler_id  
 
             self.ui.label_gewaehlter_verteiler.setText(f"Verteiler/Knoten ID: {verteiler_id}")
             self.ui.label_gewaehlter_verteiler.setStyleSheet("background-color: lightgreen;")
 
-            # Highlight setzen
             if self.verteiler_highlight_1:
                 self.verteiler_highlight_1.hide()
             self.verteiler_highlight_1 = QgsHighlight(self.iface.mapCanvas(), nearest_feature.geometry(), layer)
@@ -287,12 +321,12 @@ class LeerrohrVerlegenTool(QDialog):
 
             QgsMessageLog.logMessage(f"Erster Knoten gewählt: {self.selected_verteiler}", "Leerrohr-Tool", level=Qgis.Info)
         else:
-            self.ui.label_gewaehlter_verteiler.setText("Kein Knoten innerhalb von 20 m gefunden")
+            self.ui.label_gewaehlter_verteiler.setText("Kein Knoten innerhalb der Toleranz gefunden")
             self.ui.label_gewaehlter_verteiler.setStyleSheet("background-color: lightcoral;")
 
         self.iface.mapCanvas().unsetMapTool(self.map_tool)
         self.map_tool = None
-
+        
     def select_verteiler_2(self):
         """Aktiviert das Map-Tool zum Auswählen des zweiten Verteilers/Knotens."""
         self.ui.label_gewaehlter_verteiler_2.clear()  # Label zurücksetzen
@@ -311,6 +345,10 @@ class LeerrohrVerlegenTool(QDialog):
 
     def verteiler_2_selected(self, point):
         """Speichert den gewählten zweiten Verteiler/Knoten in `selected_verteiler_2`."""
+        import time
+        start_time = time.time()
+
+        print("DEBUG: Starte Knotenauswahl (Verteiler 2)")
         layer_name = "LWL_Knoten"
         layer = QgsProject.instance().mapLayersByName(layer_name)
         if not layer:
@@ -319,11 +357,22 @@ class LeerrohrVerlegenTool(QDialog):
             return
         layer = layer[0]
 
+        # Berechne die Toleranz in Metern, basierend auf 10 Pixeln und dem aktuellen Maßstab
+        map_scale = self.iface.mapCanvas().scale()
+        dpi = 96  # Standard-DPI (kann angepasst werden, je nach Monitor)
+        meters_per_pixel = map_scale / (39.37 * dpi)  # 39.37 = Zoll pro Meter
+        threshold_distance = 10 * meters_per_pixel  # 10 Pixel als Toleranz, in Metern umgerechnet
+
         nearest_feature = None
         nearest_distance = float("inf")
-        threshold_distance = 20  # Maximale Entfernung in Metern
 
-        for feature in layer.getFeatures():
+        # Erstelle einen räumlichen Filter (Buffer um den Klickpunkt)
+        buffer = QgsGeometry.fromPointXY(point).buffer(threshold_distance, 8)  # 8 Segmente für die Rundung
+        request = QgsFeatureRequest().setFilterRect(buffer.boundingBox())
+
+        feature_count = 0
+        for feature in layer.getFeatures(request):
+            feature_count += 1
             if feature["TYP"] not in ["Verteilerkasten", "Schacht", "Ortszentrale", "Hilfsknoten"]:
                 continue
             distance = feature.geometry().distance(QgsGeometry.fromPointXY(point))
@@ -331,14 +380,16 @@ class LeerrohrVerlegenTool(QDialog):
                 nearest_distance = distance
                 nearest_feature = feature
 
+        print(f"DEBUG: Anzahl der Features im Filterbereich: {feature_count}")
+        print(f"DEBUG: Zeit für Knotenauswahl: {time.time() - start_time} Sekunden")
+
         if nearest_feature and nearest_distance <= threshold_distance:
-            verteiler_id = nearest_feature["id"]  # ID speichern
+            verteiler_id = nearest_feature["id"]
             self.selected_verteiler_2 = verteiler_id  
 
             self.ui.label_gewaehlter_verteiler_2.setText(f"Verteiler/Knoten ID: {verteiler_id}")
             self.ui.label_gewaehlter_verteiler_2.setStyleSheet("background-color: lightgreen;")
 
-            # Highlight setzen
             if self.verteiler_highlight_2:
                 self.verteiler_highlight_2.hide()
             self.verteiler_highlight_2 = QgsHighlight(self.iface.mapCanvas(), nearest_feature.geometry(), layer)
@@ -348,17 +399,17 @@ class LeerrohrVerlegenTool(QDialog):
 
             QgsMessageLog.logMessage(f"Zweiter Knoten gewählt: {self.selected_verteiler_2}", "Leerrohr-Tool", level=Qgis.Info)
         else:
-            self.ui.label_gewaehlter_verteiler_2.setText("Kein Knoten innerhalb von 20 m gefunden")
+            self.ui.label_gewaehlter_verteiler_2.setText("Kein Knoten innerhalb der Toleranz gefunden")
             self.ui.label_gewaehlter_verteiler_2.setStyleSheet("background-color: lightcoral;")
 
         self.iface.mapCanvas().unsetMapTool(self.map_tool)
         self.map_tool = None
         
     def start_routing(self):
-        """Startet das Routing und hebt die berechnete Route hervor."""
+        """Startet das Routing und hebt bis zu 3 berechnete Routen hervor, von denen der Benutzer eine auswählen kann."""
         print(f"DEBUG: Starte Routing – selected_verteiler: {self.selected_verteiler}, selected_verteiler_2: {self.selected_verteiler_2}")
 
-        # Vorherige Route löschen (falls vorhanden)
+        # Vorherige Routen löschen (falls vorhanden)
         if hasattr(self, "route_highlights") and self.route_highlights:
             for highlight in self.route_highlights:
                 highlight.setVisible(False)
@@ -372,61 +423,218 @@ class LeerrohrVerlegenTool(QDialog):
 
         # Prüfen, ob Werte vorhanden sind
         if not start_id or not end_id:
-            self.ui.label_Pruefung.setText("Bitte Start- und Endknoten auswählen!")
-            self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral; color: white; font-weight: bold; padding: 5px;")
+            self.ui.label_Status.setText("Bitte Start- und Endknoten auswählen!")
+            self.ui.label_Status.setStyleSheet("background-color: lightcoral; color: white; font-weight: bold; padding: 5px;")
             return
 
         try:
             start_id = int(start_id)
             end_id = int(end_id)
         except ValueError:
-            self.ui.label_Pruefung.setText("Knoten-IDs müssen Zahlen sein!")
-            self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral; color: white; font-weight: bold; padding: 5px;")
+            self.ui.label_Status.setText("Knoten-IDs müssen Zahlen sein!")
+            self.ui.label_Status.setStyleSheet("background-color: lightcoral; color: white; font-weight: bold; padding: 5px;")
             return
 
-        # 2️⃣ Routing-SQL-Query definieren
-        sql_query = f"""
-            SELECT id FROM lwl."LWL_Trasse"
-            WHERE id IN (
-                SELECT edge FROM pgr_dijkstra(
-                    'SELECT id, "VONKNOTEN" AS source, "NACHKNOTEN" AS target, "LAENGE" AS cost FROM lwl."LWL_Trasse"',
-                    {start_id}, {end_id},
-                    false
-                )
+        # 2️⃣ Routing-SQL-Query mit pgr_ksp für 3 kürzeste Pfade
+        sql_query = """
+            SELECT seq, path_id, edge FROM pgr_ksp(
+                'SELECT id, "VONKNOTEN" AS source, "NACHKNOTEN" AS target, "LAENGE" AS cost FROM lwl."LWL_Trasse"',
+                %s, %s,
+                3,
+                false
             );
         """
 
         # 3️⃣ Query ausführen
         try:
-            result = self.db_execute(sql_query)  
-            print(f"DEBUG: Routing SQL-Abfrage: {sql_query}")
+            result = self.db_execute(sql_query % (start_id, end_id))
+            print(f"DEBUG: Routing SQL-Abfrage: {sql_query % (start_id, end_id)}")
             print(f"DEBUG: Ergebnis aus Datenbank: {result}")
 
-            if not result:
-                self.ui.label_Pruefung.setText(f"Kein Pfad gefunden!")
-                self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral; color: white; font-weight: bold; padding: 5px;")
+            if not result or len(result) == 0:
+                self.ui.label_Status.setText("Kein Pfad gefunden!")
+                self.ui.label_Status.setStyleSheet("background-color: lightcoral; color: white; font-weight: bold; padding: 5px;")
                 return
+
+            # Gruppiere die Ergebnisse nach path_id (für echte alternative Routen)
+            routes = {}
+            for seq, path_id, edge in result:
+                if path_id not in routes:
+                    routes[path_id] = []
+                if edge is not None and edge != -1:  # Ignoriere -1 (Ende des Pfads)
+                    routes[path_id].append(edge)
+
+            # Speichere die Routen als Liste von Listen für selected_trasse_ids und aktuelle Liste für Kompatibilität
+            self.selected_trasse_ids = list(routes.values())  # Liste von Listen: [[44437, 44452], [44438, 44439]]
+            self.selected_trasse_ids_flat = []  # Flache Liste für Kompatibilität mit anderen Methoden
+            for route in routes.values():
+                self.selected_trasse_ids_flat.extend(route)
+
+            # Speichere routes_by_path_id für die spätere Nutzung in highlight_selected_route
+            self.routes_by_path_id = routes
+
+            print(f"DEBUG: Gefundene Routen nach path_id: {routes}")
+            print(f"DEBUG: Nach Routing – selected_trasse_ids (als Liste von Listen): {self.selected_trasse_ids}")
+            print(f"DEBUG: Nach Routing – selected_trasse_ids_flat: {self.selected_trasse_ids_flat}")
+
+            # 4️⃣ Hebe alle Routen hervor (3 Farben)
+            self.highlight_multiple_routes(list(routes.values()))
+
+            # 5️⃣ Aktiviere MapTool zur Routenauswahl, wenn mehr als eine Route existiert
+            if len(routes) > 1:
+                self.activate_route_selection()
+                self.ui.label_Status.setText("Wählen Sie eine Route aus den hervorgehobenen Pfaden!")
+            else:
+                self.ui.label_Status.setText("Route berechnet – Import möglich!")
+            
+            self.ui.label_Status.setStyleSheet("background-color: lightgreen; color: black; font-weight: bold; padding: 5px;")
+
         except Exception as e:
-            self.ui.label_Pruefung.setText(f"Datenbankfehler: {e}")
-            self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral; color: white; font-weight: bold; padding: 5px;")
+            self.ui.label_Status.setText(f"Datenbankfehler: {e}")
+            self.ui.label_Status.setStyleSheet("background-color: lightcoral; color: white; font-weight: bold; padding: 5px;")
+            return
+        
+    def highlight_multiple_routes(self, routes):
+        """Hebt eine oder mehrere Routen in unterschiedlichen Farben in QGIS hervor."""
+        print(f"DEBUG: Anzahl der Routen zum Highlighten: {len(routes)}")
+
+        if hasattr(self, "route_highlights") and self.route_highlights:
+            for highlight in self.route_highlights:
+                highlight.setVisible(False)
+            self.route_highlights.clear()
+
+        self.route_highlights = []
+
+        layer_list = QgsProject.instance().mapLayersByName("LWL_Trasse")
+        if not layer_list:
+            print("⚠ Fehler: Der Layer 'LWL_Trasse' wurde nicht gefunden!")
             return
 
-        # 4️⃣ Speichere die Trassen-IDs
-        self.selected_trasse_ids = [row[0] for row in result]  # Speichere die IDs der Trassen aus dem Routing
-        print(f"DEBUG: Nach Routing – selected_trasse_ids: {self.selected_trasse_ids}")
+        trasse_layer = layer_list[0]
 
-        # 5️⃣ Geometrie verarbeiten und in QGIS hervorheben
-        self.highlight_route(result)
+        if len(routes) == 1:  # Nur eine Route (kürzester Pfad)
+            color = QColor(255, 0, 0, 150)  # Rot für den kürzesten Pfad
+            for trassen_id in routes[0]:
+                print(f"DEBUG: Trassen-ID zum Highlighten (Route): {trassen_id}")
 
-        # 6️⃣ Aktualisiere die Verbundnummern, wenn Multi-Rohr ausgewählt ist und Mehrfachimport aktiviert ist
-        selected_typ = self.ui.comboBox_leerrohr_typ.currentData()
-        if selected_typ == 3 and self.ui.checkBox_clearForm.isChecked():  # Nur für Multi-Rohr und Mehrfachimport
-            print("DEBUG: Mehrfachimport aktiviert – aktualisiere Verbundnummer nach Routing für Multi-Rohr")
-            self.populate_verbundnummer()
+                request = QgsFeatureRequest().setFilterExpression(f'"id" = {trassen_id}')
+                feature_iter = trasse_layer.getFeatures(request)
 
-        # Erfolgsmeldung setzen
-        self.ui.label_Pruefung.setText("Routing erfolgreich!")
-        self.ui.label_Pruefung.setStyleSheet("background-color: lightgreen; color: black; font-weight: bold; padding: 5px;")
+                for feature in feature_iter:
+                    highlight = QgsHighlight(self.iface.mapCanvas(), feature.geometry(), trasse_layer)
+                    highlight.setColor(color)
+                    highlight.setWidth(10)
+                    highlight.show()
+                    self.route_highlights.append(highlight)
+        else:  # Mehrere Routen (alternative Pfade)
+            colors = [QColor(255, 0, 0, 150), QColor(0, 0, 255, 150), QColor(0, 255, 0, 150)]  # Rot, Blau, Grün
+            for i, route in enumerate(routes):
+                for trassen_id in route:
+                    print(f"DEBUG: Trassen-ID zum Highlighten (Route {i+1}): {trassen_id}")
+
+                    request = QgsFeatureRequest().setFilterExpression(f'"id" = {trassen_id}')
+                    feature_iter = trasse_layer.getFeatures(request)
+
+                    for feature in feature_iter:
+                        highlight = QgsHighlight(self.iface.mapCanvas(), feature.geometry(), trasse_layer)
+                        highlight.setColor(colors[i % len(colors)])  # Wechsle Farben für jede Route
+                        highlight.setWidth(10)
+                        highlight.show()
+                        self.route_highlights.append(highlight)
+
+        print(f"DEBUG: {len(self.route_highlights)} Highlights gesetzt")
+
+    def activate_route_selection(self):
+        print("DEBUG: Aktiviere MapTool zur Routenauswahl")
+
+        class RouteSelectionTool(QgsMapToolEmitPoint):
+            def __init__(self, tool):
+                self.tool = tool
+                super().__init__(tool.iface.mapCanvas())
+                # Speichere die Gruppierung nach path_id aus den Routenergebnissen
+                self.routes_by_path_id = {}
+                for path_id, route in enumerate(self.tool.selected_trasse_ids):  # selected_trasse_ids ist Liste von Listen
+                    if path_id < len(self.tool.selected_trasse_ids):
+                        self.routes_by_path_id[path_id + 1] = self.tool.selected_trasse_ids[path_id]
+
+            def canvasReleaseEvent(self, event):
+                point = event.mapPoint()
+                layer = QgsProject.instance().mapLayersByName("LWL_Trasse")[0]
+                for feature in layer.getFeatures():
+                    if feature.geometry().distance(QgsGeometry.fromPointXY(point)) < 20:  # 20 Meter Toleranz
+                        trassen_id = feature["id"]
+                        # Suche in allen Routen (verschachtelte Listen)
+                        for path_id, route in self.routes_by_path_id.items():
+                            if trassen_id in route:  # Prüfe, ob trassen_id in einer der inneren Listen ist
+                                # Setze die gesamte Route für diesen path_id als selected_trasse_ids
+                                self.tool.selected_trasse_ids = route
+                                self.tool.highlight_selected_route()
+                                self.tool.iface.mapCanvas().unsetMapTool(self)
+                                self.tool.ui.label_Status.setText(f"Route {path_id} ausgewählt – Import möglich!")
+                                self.tool.ui.label_Status.setStyleSheet("background-color: lightgreen; color: black; font-weight: bold; padding: 5px;")
+                                
+                                # Aktualisiere die Verbundnummer basierend auf der ausgewählten Route
+                                self.tool.populate_verbundnummer()
+                                
+                                return
+                        break
+                self.tool.ui.label_Status.setText("Kein gültiger Pfad ausgewählt!")
+                self.tool.ui.label_Status.setStyleSheet("background-color: lightcoral; color: white; font-weight: bold; padding: 5px;")
+
+        self.map_tool = RouteSelectionTool(self)
+        self.iface.mapCanvas().setMapTool(self.map_tool)
+        
+    def highlight_selected_route(self):
+        print(f"DEBUG: Hebe ausgewählte Route hervor – selected_trasse_ids: {self.selected_trasse_ids}")
+
+        if hasattr(self, "route_highlights") and self.route_highlights:
+            for highlight in self.route_highlights:
+                highlight.setVisible(False)
+            self.route_highlights.clear()
+
+        self.route_highlights = []
+
+        layer_list = QgsProject.instance().mapLayersByName("LWL_Trasse")
+        if not layer_list:
+            print("⚠ Fehler: Der Layer 'LWL_Trasse' wurde nicht gefunden!")
+            return
+
+        trasse_layer = layer_list[0]
+
+        # Farben basierend auf path_id
+        colors = {
+            1: QColor(255, 0, 0, 150),  # Rot für path_id 1
+            2: QColor(0, 0, 255, 150),  # Blau für path_id 2
+            3: QColor(0, 255, 0, 150)   # Grün für path_id 3
+        }
+
+        # Finde den path_id der ausgewählten Route
+        selected_route = self.selected_trasse_ids
+        path_id = None
+        for pid, route in self.routes_by_path_id.items():
+            if route == selected_route:
+                path_id = pid
+                break
+
+        if path_id is None:
+            path_id = 1  # Fallback auf Rot
+
+        color = colors.get(path_id, QColor(255, 0, 0, 150))  # Standardfarbe Rot
+
+        for trassen_id in selected_route:
+            print(f"DEBUG: Trassen-ID zur finalen Hervorhebung: {trassen_id}")
+
+            request = QgsFeatureRequest().setFilterExpression(f'"id" = {trassen_id}')
+            feature_iter = trasse_layer.getFeatures(request)
+
+            for feature in feature_iter:
+                highlight = QgsHighlight(self.iface.mapCanvas(), feature.geometry(), trasse_layer)
+                highlight.setColor(color)
+                highlight.setWidth(10)
+                highlight.show()
+                self.route_highlights.append(highlight)
+
+        print(f"DEBUG: {len(self.route_highlights)} finale Highlights gesetzt")
 
     def clear_routing(self):
         """Entfernt alle bestehenden Routing-Highlights aus der Karte."""
@@ -445,51 +653,6 @@ class LeerrohrVerlegenTool(QDialog):
         self.route_highlights = []
 
         print(f"DEBUG: Nach dem Entfernen - Anzahl der Routing-Highlights: {len(self.route_highlights)}")
-
-    def highlight_route(self, result):
-        """Hebt die berechnete Route als Highlight in QGIS hervor."""
-        
-        from qgis.core import QgsProject, QgsFeatureRequest
-        from qgis.gui import QgsHighlight
-        from PyQt5.QtGui import QColor
-
-        print(f"DEBUG: Anzahl der Features im Routing-Ergebnis: {len(result)}")
-
-        # Falls ein vorheriges Highlight existiert, löschen
-        if hasattr(self, "route_highlights") and self.route_highlights:
-            for highlight in self.route_highlights:
-                highlight.setVisible(False)
-            self.route_highlights.clear()
-        
-        # Liste für die neuen Highlights
-        self.route_highlights = []
-
-        # Passenden Layer finden
-        layer_list = QgsProject.instance().mapLayersByName("LWL_Trasse")
-        if not layer_list:
-            print("⚠ Fehler: Der Layer 'LWL_Trasse' wurde nicht gefunden!")
-            return
-
-        trasse_layer = layer_list[0]  # Ersten gefundenen Layer verwenden
-
-        # Alle Trassen aus dem Routing-Ergebnis hervorheben
-        for row in result:
-            trassen_id = row[0]  # ID der gefundenen Trasse
-            print(f"DEBUG: Trassen-ID zum Highlighten: {trassen_id}")
-
-            # Passende Trasse in der Karte suchen
-            request = QgsFeatureRequest().setFilterExpression(f'"id" = {trassen_id}')
-            feature_iter = trasse_layer.getFeatures(request)
-
-            for feature in feature_iter:
-                highlight = QgsHighlight(self.iface.mapCanvas(), feature.geometry(), trasse_layer)
-                highlight.setColor(QColor(255, 0, 0, 150))  # Rote Transparente Markierung
-                highlight.setWidth(10)
-                highlight.show()
-                self.route_highlights.append(highlight)
-
-        # Erfolgsmeldung
-        print(f"DEBUG: {len(self.route_highlights)} Highlights gesetzt")
 
     def select_parent_leerrohr(self):
         """Dummy-Methode für den Button Parent-Leerrohr"""
@@ -550,8 +713,8 @@ class LeerrohrVerlegenTool(QDialog):
             self.ui.comboBox_leerrohr_typ.setCurrentIndex(-1)
 
         except Exception as e:
-            self.ui.label_Pruefung.setText(f"Fehler beim Abrufen der Leerrohrtypen: {e}")
-            self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
+            self.ui.label_Status.setText(f"Fehler beim Abrufen der Leerrohrtypen: {e}")
+            self.ui.label_Status.setStyleSheet("background-color: lightcoral;")
             print(f"DEBUG: Fehler bei der Abfrage der Leerrohrtypen: {e}")
         finally:
             print("DEBUG: Schließe Datenbankverbindung")
@@ -636,8 +799,8 @@ class LeerrohrVerlegenTool(QDialog):
                 self.ui.comboBox_leerrohr_typ_2.addItem("Keine Subtypen verfügbar")
 
         except Exception as e:
-            self.ui.label_Pruefung.setText(f"Fehler beim Laden der Subtypen: {e}")
-            self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
+            self.ui.label_Status.setText(f"Fehler beim Laden der Subtypen: {e}")
+            self.ui.label_Status.setStyleSheet("background-color: lightcoral;")
 
         finally:
             if cur:
@@ -763,8 +926,8 @@ class LeerrohrVerlegenTool(QDialog):
                 print("DEBUG: Keine freie Verbundnummer gefunden.")
 
         except Exception as e:
-            self.ui.label_Pruefung.setText(f"Fehler beim Abrufen der Verbundnummern: {e}")
-            self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
+            self.ui.label_Status.setText(f"Fehler beim Abrufen der Verbundnummern: {e}")
+            self.ui.label_Status.setStyleSheet("background-color: lightcoral;")
             print(f"DEBUG: Fehler bei der Datenbankabfrage: {e}")
 
         finally:
@@ -827,8 +990,8 @@ class LeerrohrVerlegenTool(QDialog):
                 self.ui.comboBox_Farbschema.addItem("Keine Farbschemata verfügbar")
 
         except Exception as e:
-            self.ui.label_Pruefung.setText(f"Fehler beim Laden der Farbschemata: {e}")
-            self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
+            self.ui.label_Status.setText(f"Fehler beim Laden der Farbschemata: {e}")
+            self.ui.label_Status.setStyleSheet("background-color: lightcoral;")
 
         finally:
             if cur:
@@ -888,8 +1051,8 @@ class LeerrohrVerlegenTool(QDialog):
                 self.ui.comboBox_Firma.addItem("Keine Firma verfügbar")
 
         except Exception as e:
-            self.ui.label_Pruefung.setText(f"Fehler beim Laden der Firmen: {e}")
-            self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
+            self.ui.label_Status.setText(f"Fehler beim Laden der Firmen: {e}")
+            self.ui.label_Status.setStyleSheet("background-color: lightcoral;")
 
         finally:
             if cur:
@@ -1000,12 +1163,12 @@ class LeerrohrVerlegenTool(QDialog):
 
         # ✅ 4. Falls die Prüfung bestanden wurde → Import ermöglichen
         if fehler:
-            self.ui.label_Pruefung.setText("; ".join(fehler))
-            self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
+            self.ui.label_Status.setText("; ".join(fehler))
+            self.ui.label_Status.setStyleSheet("background-color: lightcoral;")
             self.ui.pushButton_Import.setEnabled(False)
         else:
-            self.ui.label_Pruefung.setText("Prüfung erfolgreich. Import möglich.")
-            self.ui.label_Pruefung.setStyleSheet("background-color: lightgreen;")
+            self.ui.label_Status.setText("Prüfung erfolgreich. Import möglich.")
+            self.ui.label_Status.setStyleSheet("background-color: lightgreen;")
             self.ui.pushButton_Import.setEnabled(True)
 
     def ordne_trassen(self, trassen_info):
@@ -1084,8 +1247,8 @@ class LeerrohrVerlegenTool(QDialog):
 
             # 🔹 Falls keine gültigen Geometrien → Fehler
             if not trassen_geometrien or len(trassen_geometrien) != len(self.selected_trasse_ids):
-                self.ui.label_Pruefung.setText("❌ Fehler: Nicht alle Trassen haben gültige Geometrien.")
-                self.ui.label_Pruefung.setStyleSheet("background-color: lightcoral;")
+                self.ui.label_Status.setText("❌ Fehler: Nicht alle Trassen haben gültige Geometrien.")
+                self.ui.label_Status.setStyleSheet("background-color: lightcoral;")
                 return
 
             # 🔹 Verbinde Geometrien zu einer einzigen Linie
@@ -1171,8 +1334,8 @@ class LeerrohrVerlegenTool(QDialog):
                 self.verteiler_highlight_2.hide()
                 self.verteiler_highlight_2 = None
 
-            self.ui.label_Pruefung.clear()
-            self.ui.label_Pruefung.setStyleSheet("")
+            self.ui.label_Status.clear()
+            self.ui.label_Status.setStyleSheet("")
 
             self.ui.comboBox_Gefoerdert.setCurrentIndex(-1)
             self.ui.comboBox_Subduct.setCurrentIndex(-1)
@@ -1218,8 +1381,8 @@ class LeerrohrVerlegenTool(QDialog):
             self.verteiler_highlight_2.hide()
             self.verteiler_highlight_2 = None
 
-        self.ui.label_Pruefung.clear()
-        self.ui.label_Pruefung.setStyleSheet("")
+        self.ui.label_Status.clear()
+        self.ui.label_Status.setStyleSheet("")
 
         self.ui.comboBox_Gefoerdert.setCurrentIndex(-1)
         self.ui.comboBox_Subduct.setCurrentIndex(-1)
