@@ -2,12 +2,13 @@ import logging
 from qgis.core import QgsVectorLayer, QgsFeature, QgsProject, QgsDataSourceUri, Qgis, QgsGeometry, QgsFeatureRequest, QgsMessageLog
 from qgis.gui import QgsMapToolEmitPoint
 from qgis.PyQt.QtWidgets import QDialog, QDialogButtonBox, QCheckBox, QMessageBox
-from qgis.PyQt.QtCore import Qt
+from qgis.PyQt.QtCore import Qt, QDate
 from .leerrohr_verlegen_dialog import Ui_LeerrohrVerlegungsToolDialogBase
 from qgis.PyQt.QtSql import QSqlDatabase, QSqlQuery
 from qgis.gui import QgsHighlight
 from qgis.PyQt.QtGui import QColor
 import psycopg2
+import datetime
 
 # Logging konfigurieren
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -21,25 +22,35 @@ class LeerrohrVerlegenTool(QDialog):
         self.ui.setupUi(self)
         self.setWindowFlag(Qt.WindowStaysOnTopHint)
 
-        # **Variablen für die gewählten Objekte**
+        # Variablen für die gewählten Objekte
         self.selected_verteiler = None
         self.selected_verteiler_2 = None
         self.selected_parent_leerrohr = None
-        self.selected_knoten_abzweigung = None
+        self.selected_subduct_parent = None
 
-        # **Verknüpfe Buttons mit bestehenden Methoden**
+        # Map-Tool-Variablen und Trassen-Listen
+        self.map_tool = None
+        self.selected_trasse_ids = []
+        self.selected_trasse_ids_flat = []  # Hinzugefügt, um den Fehler zu beheben
+        self.trasse_highlights = []
+        self.verteiler_highlight_1 = None
+        self.verteiler_highlight_2 = None
+        self.parent_highlight = None
+        self.subduct_highlight = None
+        self.route_highlights = []
+
+        # Verknüpfe Buttons mit bestehenden Methoden
         self.ui.pushButton_verteiler.clicked.connect(self.select_verteiler)
         self.ui.pushButton_verteiler_2.clicked.connect(self.select_verteiler_2)
         self.ui.pushButton_Parent_Leerrohr.clicked.connect(self.select_parent_leerrohr)
-        self.ui.pushButton_Knoten_Abzweigung.clicked.connect(self.select_knoten_abzweigung)
-        
         self.ui.pushButton_routing.clicked.connect(self.start_routing)
+        self.ui.pushButton_subduct.clicked.connect(self.select_subduct_parent)
 
         self.ui.pushButton_Datenpruefung.clicked.connect(self.pruefe_daten)
         self.ui.pushButton_Import.setEnabled(False)
         self.ui.pushButton_Import.clicked.connect(self.importiere_daten)
 
-        # **Reset & Cancel Buttons**
+        # Reset & Cancel Buttons
         reset_button = self.ui.button_box.button(QDialogButtonBox.Reset)
         cancel_button = self.ui.button_box.button(QDialogButtonBox.Cancel)
         if reset_button:
@@ -47,42 +58,40 @@ class LeerrohrVerlegenTool(QDialog):
         if cancel_button:
             cancel_button.clicked.connect(self.close_tool)
 
-        # **Map-Tool-Variablen**
-        self.map_tool = None
-        self.selected_trasse_ids = []
-        self.trasse_highlights = []
-        self.verteiler_highlight_1 = None
-        self.verteiler_highlight_2 = None
-
-        # **Radiobuttons für Verlegungsmodus**
+        # Radiobuttons für Verlegungsmodus
         self.ui.radioButton_Hauptstrang.toggled.connect(self.update_verlegungsmodus)
         self.ui.radioButton_Abzweigung.toggled.connect(self.update_verlegungsmodus)
 
-        # **Dropdown-Verknüpfungen**
+        # CheckBoxen für Förderung und Subduct
+        self.ui.checkBox_Foerderung.toggled.connect(self.update_combobox_states)
+        self.ui.checkBox_Subduct.toggled.connect(self.update_subduct_button)
+
+        # Dropdown-Verknüpfungen
         self.ui.comboBox_leerrohr_typ.currentIndexChanged.connect(self.update_selected_leerrohr_typ)
         self.ui.comboBox_leerrohr_typ.currentIndexChanged.connect(self.populate_leerrohr_subtypen)
         self.ui.comboBox_leerrohr_typ_2.currentIndexChanged.connect(self.update_selected_leerrohr_subtyp)
         self.ui.comboBox_leerrohr_typ.currentIndexChanged.connect(self.update_combobox_states)
 
-        # **🚀 Korrekte Reihenfolge für Abhängigkeiten**
-        self.ui.comboBox_Firma.currentIndexChanged.connect(self.populate_farbschema)  
-        self.ui.comboBox_Farbschema.currentIndexChanged.connect(self.populate_leerrohr_subtypen)  
+        # Korrekte Reihenfolge für Abhängigkeiten
+        self.ui.comboBox_Firma.currentIndexChanged.connect(self.populate_farbschema)
+        self.ui.comboBox_Farbschema.currentIndexChanged.connect(self.populate_leerrohr_subtypen)
         self.ui.comboBox_leerrohr_typ.currentIndexChanged.connect(self.populate_firma)
 
-        # **Setze Standardzustand (Firma deaktiviert)**
+        # Setze Standardzustand (Firma deaktiviert)
         self.ui.comboBox_Firma.setEnabled(False)
 
-        # **Direkte Initialisierung**
+        # Direkte Initialisierung
         self.populate_leerrohr_typen()
         self.populate_gefoerdert_subduct()
-        self.populate_farbschema()  
-        self.update_verbundnummer_dropdown()  # Ändere auf update_verbundnummer_dropdown, falls vorhanden
+        self.populate_farbschema()
+        self.update_verbundnummer_dropdown()
+        self.update_verlegungsmodus()
 
-        # **Erzwinge eine Initialisierung des Verlegungsmodus**
+        # Erzwinge eine Initialisierung des Verlegungsmodus
         self.update_verlegungsmodus()
         
         # Speichert Routen nach path_id für Farben
-        self.routes_by_path_id = {}  
+        self.routes_by_path_id = {}
         
         print(f"DEBUG: Initialer Status von comboBox_Verbundnummer: {self.ui.comboBox_Verbundnummer.currentText()}, Enabled: {self.ui.comboBox_Verbundnummer.isEnabled()}")
         
@@ -170,34 +179,10 @@ class LeerrohrVerlegenTool(QDialog):
             return None
        
     def update_verlegungsmodus(self):
-        """Aktiviert oder deaktiviert Felder je nach Auswahl von Hauptstrang/Abzweigung."""
+        """Aktiviert oder deaktiviert Felder je nach Auswahl von Hauptstrang/Abzweigung und aktualisiert Werte."""
         print("DEBUG: Starte update_verlegungsmodus")
-        if self.ui.radioButton_Hauptstrang.isChecked():
-            # ✅ Hauptstrang-Modus → Typ & Subtyp aktivieren, Parent & Knoten deaktivieren
-            self.populate_leerrohr_typen()
-            self.populate_leerrohr_subtypen()
-
-            self.ui.comboBox_leerrohr_typ.setEnabled(True)
-            self.ui.comboBox_leerrohr_typ_2.setEnabled(True)
-
-            self.ui.pushButton_Parent_Leerrohr.setEnabled(False)  
-            self.ui.pushButton_Knoten_Abzweigung.setEnabled(False)   
-
-            # Attribute aktivieren
-            self.ui.comboBox_Verbundnummer.setEnabled(self.ui.comboBox_leerrohr_typ.currentData() == 3)
-            print(f"DEBUG: Verbundnummer-Status in Hauptstrang-Modus: {self.ui.comboBox_Verbundnummer.isEnabled()}")
-            self.ui.comboBox_Farbschema.setEnabled(True)
-            self.ui.comboBox_Gefoerdert.setEnabled(True)
-            self.ui.comboBox_Subduct.setEnabled(True)
-            self.ui.label_Kommentar.setEnabled(True)
-            self.ui.label_Kommentar_2.setEnabled(True)
-            self.ui.mDateTimeEdit_Strecke.setEnabled(True)
-
-            # **Firma-ComboBox wird nur aktiviert, wenn update_combobox_states() es erlaubt**
-            self.update_combobox_states()
-
-        else:
-            # ✅ Abzweigungs-Modus → Typ & Subtyp deaktivieren, Parent & Knoten aktivieren
+        if self.ui.radioButton_Abzweigung.isChecked():
+            # Abzweigungs-Modus → Typ & Subtyp deaktivieren, Parent & Start/Ende aktivieren
             self.ui.comboBox_leerrohr_typ.clear()
             self.ui.comboBox_leerrohr_typ.addItem("Deaktiviert")
             self.ui.comboBox_leerrohr_typ.setEnabled(False)
@@ -206,27 +191,29 @@ class LeerrohrVerlegenTool(QDialog):
             self.ui.comboBox_leerrohr_typ_2.addItem("Deaktiviert")
             self.ui.comboBox_leerrohr_typ_2.setEnabled(False)
 
-            self.ui.pushButton_Parent_Leerrohr.setEnabled(True)  
-            self.ui.pushButton_Knoten_Abzweigung.setEnabled(True)  
+            self.ui.pushButton_Parent_Leerrohr.setEnabled(True)
+            self.ui.label_Parent_Leerrohr.setEnabled(True)
+            self.ui.pushButton_verteiler.setText("Startknoten Abzweigung")
+            self.ui.pushButton_verteiler_2.setText("Endknoten Abzweigung")
 
-            # **Firma ZWANGSWEISE deaktivieren**
-            self.ui.comboBox_Firma.clear()  
-            self.ui.comboBox_Firma.setEnabled(False)  
-
-            # **Attribute deaktivieren, aber Werte aus Parent-Leerrohr übernehmen**
+            # Attribute deaktivieren, aber Werte aus Parent-Leerrohr übernehmen
             self.ui.comboBox_Verbundnummer.setEnabled(False)
             print(f"DEBUG: Verbundnummer-Status in Abzweigungs-Modus: {self.ui.comboBox_Verbundnummer.isEnabled()}")
             self.ui.comboBox_Farbschema.setEnabled(False)
-            self.ui.comboBox_Gefoerdert.setEnabled(False)
-            self.ui.comboBox_Subduct.setEnabled(False)
+            self.ui.checkBox_Foerderung.setEnabled(False)
+            self.ui.checkBox_Subduct.setEnabled(False)
+            self.ui.pushButton_subduct.setEnabled(False)  # Subduct-Button deaktivieren
+            self.ui.label_Subduct.setEnabled(False)       # Subduct-Label deaktivieren
             self.ui.label_Kommentar.setEnabled(False)
             self.ui.label_Kommentar_2.setEnabled(False)
             self.ui.mDateTimeEdit_Strecke.setEnabled(False)
 
             # Falls Parent-Leerrohr gewählt wurde → Werte übernehmen
             if self.selected_parent_leerrohr:
+                print(f"DEBUG: Selected Parent-Leerrohr: {self.selected_parent_leerrohr}")
                 if "VERBUNDNUMMER" in self.selected_parent_leerrohr:
                     parent_verbundnummer = self.selected_parent_leerrohr["VERBUNDNUMMER"]
+                    print(f"DEBUG: VERBUNDNUMMER: {parent_verbundnummer}")
                     if self.ui.comboBox_leerrohr_typ.currentData() == 3:  # Nur Multi-Rohr
                         index = self.ui.comboBox_Verbundnummer.findText(str(parent_verbundnummer))
                         if index != -1:
@@ -237,34 +224,199 @@ class LeerrohrVerlegenTool(QDialog):
                         self.ui.comboBox_Verbundnummer.setCurrentIndex(0)
 
                 if "FARBSCHEMA" in self.selected_parent_leerrohr:
-                    index = self.ui.comboBox_Farbschema.findText(self.selected_parent_leerrohr["FARBSCHEMA"])
+                    farbschema = self.selected_parent_leerrohr["FARBSCHEMA"]
+                    print(f"DEBUG: FARBSCHEMA: {farbschema}")
+                    index = self.ui.comboBox_Farbschema.findText(farbschema)
                     if index != -1:
                         self.ui.comboBox_Farbschema.setCurrentIndex(index)
 
                 if "GEFOERDERT" in self.selected_parent_leerrohr:
-                    self.ui.comboBox_Gefoerdert.setCurrentText("Ja" if self.selected_parent_leerrohr["GEFOERDERT"] else "Nein")
+                    gefoerdert = self.selected_parent_leerrohr["GEFOERDERT"]
+                    print(f"DEBUG: GEFOERDERT: {gefoerdert}")
+                    self.ui.checkBox_Foerderung.setChecked(gefoerdert)
 
                 if "SUBDUCT" in self.selected_parent_leerrohr:
-                    self.ui.comboBox_Subduct.setCurrentText("Ja" if self.selected_parent_leerrohr["SUBDUCT"] else "Nein")
+                    subduct = self.selected_parent_leerrohr["SUBDUCT"]
+                    print(f"DEBUG: SUBDUCT: {subduct}")
+                    self.ui.checkBox_Subduct.setChecked(subduct)
 
                 if "KOMMENTAR" in self.selected_parent_leerrohr:
-                    self.ui.label_Kommentar.setText(self.selected_parent_leerrohr["KOMMENTAR"])
+                    kommentar = self.selected_parent_leerrohr["KOMMENTAR"]
+                    print(f"DEBUG: KOMMENTAR: {kommentar}")
+                    self.ui.label_Kommentar.setText(str(kommentar or ""))
 
                 if "BESCHREIBUNG" in self.selected_parent_leerrohr:
-                    self.ui.label_Kommentar_2.setText(self.selected_parent_leerrohr["BESCHREIBUNG"])
+                    beschreibung = self.selected_parent_leerrohr["BESCHREIBUNG"]
+                    print(f"DEBUG: BESCHREIBUNG: {beschreibung}")
+                    self.ui.label_Kommentar_2.setText(str(beschreibung or ""))
 
-                if "VERLEGT_AM" in self.selected_parent_leerrohr:
-                    self.ui.mDateTimeEdit_Strecke.setDate(self.selected_parent_leerrohr["VERLEGT_AM"])
+                # Aktualisiere das Datum mit Fehlerbehandlung
+                verlegt_am = self.selected_parent_leerrohr.get("VERLEGT_AM", None)
+                print(f"DEBUG: VERLEGT_AM: {verlegt_am}")
+                if verlegt_am and isinstance(verlegt_am, (QDate, datetime.date)):
+                    self.ui.mDateTimeEdit_Strecke.setDate(verlegt_am)
+                elif verlegt_am is None:
+                    self.ui.mDateTimeEdit_Strecke.setDate(QDate.currentDate())
+                else:
+                    try:
+                        date_obj = QDate.fromString(str(verlegt_am), "yyyy-MM-dd")
+                        self.ui.mDateTimeEdit_Strecke.setDate(date_obj)
+                    except ValueError:
+                        self.ui.mDateTimeEdit_Strecke.setDate(QDate.currentDate())
+        else:
+            # Hauptstrang-Modus → Typ & Subtyp aktivieren, Parent & Start/Ende deaktivieren
+            self.ui.comboBox_leerrohr_typ.setEnabled(True)
+            self.populate_leerrohr_typen()
+            self.populate_leerrohr_subtypen()
 
+            self.ui.comboBox_leerrohr_typ_2.setEnabled(True)
+
+            self.ui.pushButton_Parent_Leerrohr.setEnabled(False)
+            self.ui.label_Parent_Leerrohr.setEnabled(False)
+            self.ui.label_Parent_Leerrohr.setText("Parent-Leerrohr erfassen")
+            self.ui.label_Parent_Leerrohr.setStyleSheet("")
+            self.selected_parent_leerrohr = None
+            print("DEBUG: Parent-Leerrohr zurückgesetzt und gelöscht")
+            self.ui.pushButton_verteiler.setText("Startknoten auswählen")
+            self.ui.pushButton_verteiler_2.setText("Endknoten auswählen")
+
+            # Attribute aktivieren
+            self.ui.comboBox_Verbundnummer.setEnabled(self.ui.comboBox_leerrohr_typ.currentData() == 3)
+            print(f"DEBUG: Verbundnummer-Status in Hauptstrang-Modus: {self.ui.comboBox_Verbundnummer.isEnabled()}")
+            self.ui.comboBox_Farbschema.setEnabled(True)
+            self.ui.checkBox_Foerderung.setEnabled(True)
+            self.ui.checkBox_Subduct.setEnabled(True)
+            self.ui.pushButton_subduct.setEnabled(self.ui.checkBox_Subduct.isChecked())  # Subduct-Button abhängig von CheckBox
+            self.ui.label_Subduct.setEnabled(True)  # Subduct-Label aktivieren
+            self.ui.label_Kommentar.setEnabled(True)
+            self.ui.label_Kommentar_2.setEnabled(True)
+            self.ui.mDateTimeEdit_Strecke.setEnabled(True)
+
+            # Firma-ComboBox wird nur aktiviert, wenn update_combobox_states() es erlaubt
+            self.update_combobox_states()
+            
     def select_verteiler(self):
-        """Aktiviert das Map-Tool zum Auswählen des ersten Verteilers/Knotens."""
-        self.ui.label_gewaehlter_verteiler.clear()  # Label zurücksetzen
-
-        # Aktiviere MapTool zur Auswahl
+        """Aktiviert das Map-Tool zum Auswählen des ersten Knotens (Startknoten oder Start der Abzweigung)."""
+        print("DEBUG: Starte Auswahl des ersten Knotens")
+        if self.ui.radioButton_Abzweigung.isChecked():
+            self.ui.label_gewaehlter_verteiler.setText("Wählen Sie den Start der Abzweigung")
+        else:
+            self.ui.label_gewaehlter_verteiler.setText("Wählen Sie den Startknoten")
+        self.ui.label_gewaehlter_verteiler.clear()
+        if self.map_tool:
+            try:
+                self.map_tool.canvasClicked.disconnect()
+            except TypeError:
+                pass
         self.map_tool = QgsMapToolEmitPoint(self.iface.mapCanvas())
-        self.map_tool.canvasClicked.connect(self.verteiler_selected)
+        if self.ui.radioButton_Abzweigung.isChecked():
+            self.map_tool.canvasClicked.connect(self.abzweigung_start_selected)
+        else:
+            self.map_tool.canvasClicked.connect(self.verteiler_selected)
         self.iface.mapCanvas().setMapTool(self.map_tool)
 
+    def abzweigung_start_selected(self, point):
+        """Speichert den gewählten Startknoten der Abzweigung und validiert ihn."""
+        print("DEBUG: Starte Auswahl des ersten Knotens")
+        layer_name = "LWL_Knoten"
+        layer = QgsProject.instance().mapLayersByName(layer_name)
+        if not layer:
+            self.ui.label_gewaehlter_verteiler.setText("Layer 'LWL_Knoten' nicht gefunden")
+            self.ui.label_gewaehlter_verteiler.setStyleSheet("background-color: lightcoral;")
+            return
+
+        layer = layer[0]
+        map_scale = self.iface.mapCanvas().scale()
+        threshold_distance = 50 * (map_scale / (39.37 * 96))  # 50 Pixel in Metern basierend auf DPI und Maßstab
+
+        nearest_feature = None
+        nearest_distance = float("inf")
+
+        buffer = QgsGeometry.fromPointXY(point).buffer(threshold_distance, 8)
+        request = QgsFeatureRequest().setFilterRect(buffer.boundingBox())
+
+        for feature in layer.getFeatures(request):
+            distance = feature.geometry().distance(QgsGeometry.fromPointXY(point))
+            if distance < nearest_distance:
+                nearest_distance = distance
+                nearest_feature = feature
+
+        if nearest_feature and nearest_distance <= threshold_distance:
+            knot_id = nearest_feature["id"]
+            self.selected_verteiler = knot_id  # Speichere den gewählten Knoten
+
+            # Validierung: Prüfe, ob der Knoten auf den Trassen des Parent-Leerrohrs liegt
+            if self.selected_parent_leerrohr is None or "ID_TRASSE" not in self.selected_parent_leerrohr:
+                self.ui.label_gewaehlter_verteiler.setText("Kein Parent-Leerrohr ausgewählt oder Trassen-IDs fehlen")
+                self.ui.label_gewaehlter_verteiler.setStyleSheet("background-color: lightcoral;")
+                self.selected_verteiler = None
+                return
+
+            parent_trasse_ids = self.selected_parent_leerrohr.get("ID_TRASSE", [])
+            if parent_trasse_ids is None:
+                parent_trasse_ids = []  # Setze auf leere Liste, falls None
+            print(f"DEBUG: Parent-Trasse-IDs für Start: {parent_trasse_ids}")
+            
+            # Formatierung der Trassen-IDs als PostgreSQL-Array-String
+            if not parent_trasse_ids:  # Falls leere Liste, melde Fehler
+                self.ui.label_gewaehlter_verteiler.setText("Keine Trassen-IDs im Parent-Leerrohr gefunden")
+                self.ui.label_gewaehlter_verteiler.setStyleSheet("background-color: lightcoral;")
+                self.selected_verteiler = None
+                return
+                    
+            trasse_ids_str = "{" + ",".join(str(int(id)) for id in parent_trasse_ids) + "}"
+            print(f"DEBUG: Trasse-IDs-String: {trasse_ids_str}")
+
+            # Prüfe, ob der Knoten auf einer Trasse des Parent-Leerrohrs liegt
+            conn = self.get_database_connection()
+            with psycopg2.connect(**conn) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT COUNT(*) 
+                        FROM lwl."LWL_Trasse" 
+                        WHERE id = ANY(%s)
+                        AND ("VONKNOTEN" = %s OR "NACHKNOTEN" = %s)
+                    """, (trasse_ids_str, knot_id, knot_id))
+                    result = cur.fetchone()
+                    print(f"DEBUG: Ergebnis aus Datenbank: {result}")
+
+                    if result and result[0] > 0:
+                        self.ui.label_gewaehlter_verteiler.setText(f"Startknoten: {knot_id}")
+                        self.ui.label_gewaehlter_verteiler.setStyleSheet("background-color: lightgreen;")
+                        
+                        # Highlighting des Startknotens hinzufügen
+                        if hasattr(self, "verteiler_highlight_1") and self.verteiler_highlight_1:
+                            self.verteiler_highlight_1.hide()  # Vorheriges Highlight entfernen
+                        self.verteiler_highlight_1 = QgsHighlight(self.iface.mapCanvas(), nearest_feature.geometry(), layer)
+                        self.verteiler_highlight_1.setColor(Qt.blue)  # Rot für den Startknoten
+                        self.verteiler_highlight_1.setWidth(5)
+                        self.verteiler_highlight_1.show()
+                        print(f"DEBUG: Startknoten {knot_id} hervorgehoben")
+
+                        # Zusätzliche Validierung: Prüfe, ob der Knoten nicht VKG_LR oder ENDKNOTEN des Parent-Leerrohrs ist
+                        parent_vkg_lr = self.selected_parent_leerrohr.get("VKG_LR", None)
+                        parent_endknoten = self.selected_parent_leerrohr.get("ENDKNOTEN", None)
+                        if knot_id == parent_vkg_lr or (parent_endknoten and knot_id == parent_endknoten):
+                            self.ui.label_gewaehlter_verteiler.setText("Der Startknoten der Abzweigung darf nicht Start- oder Endknoten des Parent-Leerrohrs sein!")
+                            self.ui.label_gewaehlter_verteiler.setStyleSheet("background-color: lightcoral;")
+                            self.selected_verteiler = None
+                            if self.verteiler_highlight_1:
+                                self.verteiler_highlight_1.hide()
+                                self.verteiler_highlight_1 = None
+                            return
+                    else:
+                        self.ui.label_gewaehlter_verteiler.setText("Kein Knoten auf Trasse gefunden")
+                        self.ui.label_gewaehlter_verteiler.setStyleSheet("background-color: lightcoral;")
+                        self.selected_verteiler = None
+                        return
+        else:
+            self.ui.label_gewaehlter_verteiler.setText("Kein Knoten in Reichweite gefunden")
+            self.ui.label_gewaehlter_verteiler.setStyleSheet("background-color: lightcoral;")
+            self.selected_verteiler = None
+
+        self.iface.mapCanvas().unsetMapTool(self.map_tool)
+        self.map_tool = None
+        
     def verteiler_selected(self, point):
         """Speichert den gewählten ersten Verteiler/Knoten in `selected_verteiler`."""
         import time
@@ -328,20 +480,62 @@ class LeerrohrVerlegenTool(QDialog):
         self.map_tool = None
         
     def select_verteiler_2(self):
-        """Aktiviert das Map-Tool zum Auswählen des zweiten Verteilers/Knotens."""
-        self.ui.label_gewaehlter_verteiler_2.clear()  # Label zurücksetzen
-
-        # Falls das MapTool bereits verbunden ist, zuerst trennen
+        """Aktiviert das Map-Tool zum Auswählen des zweiten Knotens (Endknoten oder Ende der Abzweigung)."""
+        print("DEBUG: Starte Auswahl des zweiten Knotens")
+        if self.ui.radioButton_Abzweigung.isChecked():
+            self.ui.label_gewaehlter_verteiler_2.setText("Wählen Sie das Ende der Abzweigung")
+        else:
+            self.ui.label_gewaehlter_verteiler_2.setText("Wählen Sie den Endknoten")
+        self.ui.label_gewaehlter_verteiler_2.clear()
         if self.map_tool:
             try:
                 self.map_tool.canvasClicked.disconnect()
             except TypeError:
-                pass  # Falls nichts verbunden ist, gibt es keinen Fehler
-
-        # Aktiviere MapTool zur Auswahl
+                pass
         self.map_tool = QgsMapToolEmitPoint(self.iface.mapCanvas())
-        self.map_tool.canvasClicked.connect(self.verteiler_2_selected)
+        if self.ui.radioButton_Abzweigung.isChecked():
+            self.map_tool.canvasClicked.connect(self.abzweigung_end_selected)
+        else:
+            self.map_tool.canvasClicked.connect(self.verteiler_2_selected)
         self.iface.mapCanvas().setMapTool(self.map_tool)
+
+    def abzweigung_end_selected(self, point):
+        """Speichert den Endknoten der Abzweigung."""
+        layer = QgsProject.instance().mapLayersByName("LWL_Knoten")[0]
+        map_scale = self.iface.mapCanvas().scale()
+        threshold_distance = 50 * (map_scale / (39.37 * 96))
+
+        nearest_feature = None
+        nearest_distance = float("inf")
+        buffer = QgsGeometry.fromPointXY(point).buffer(threshold_distance, 8)
+        request = QgsFeatureRequest().setFilterRect(buffer.boundingBox())
+
+        for feature in layer.getFeatures(request):
+            distance = feature.geometry().distance(QgsGeometry.fromPointXY(point))
+            if distance < nearest_distance:
+                nearest_distance = distance
+                nearest_feature = feature
+
+        if nearest_feature:
+            self.selected_verteiler_2 = nearest_feature["id"]
+            self.ui.label_gewaehlter_verteiler_2.setText(f"Ende Abzweigung ID: {self.selected_verteiler_2}")
+            self.ui.label_gewaehlter_verteiler_2.setStyleSheet("background-color: lightgreen;")
+
+            # Highlighting des Knotens
+            if hasattr(self, "verteiler_2_highlight") and self.verteiler_2_highlight:
+                self.verteiler_2_highlight.hide()
+            self.verteiler_2_highlight = QgsHighlight(self.iface.mapCanvas(), nearest_feature.geometry(), layer)
+            self.verteiler_2_highlight.setColor(Qt.blue)  # Grün für Ende der Abzweigung
+            self.verteiler_2_highlight.setWidth(5)
+            self.verteiler_2_highlight.show()
+
+            QgsMessageLog.logMessage(f"Ende der Abzweigung gewählt: {self.selected_verteiler_2}", "Leerrohr-Tool", level=Qgis.Info)
+        else:
+            self.ui.label_gewaehlter_verteiler_2.setText("Kein Knoten in Reichweite gefunden")
+            self.ui.label_gewaehlter_verteiler_2.setStyleSheet("background-color: lightcoral;")
+
+        self.iface.mapCanvas().unsetMapTool(self.map_tool)
+        self.map_tool = None
 
     def verteiler_2_selected(self, point):
         """Speichert den gewählten zweiten Verteiler/Knoten in `selected_verteiler_2`."""
@@ -418,14 +612,87 @@ class LeerrohrVerlegenTool(QDialog):
         print(f"DEBUG: Anzahl der Route-Highlights NACH Entfernung: {len(self.route_highlights) if hasattr(self, 'route_highlights') else 'Nicht definiert'}")
 
         # 1️⃣ Start- und Endknoten aus den gespeicherten Variablen auslesen
-        start_id = self.selected_verteiler  # Startpunkt
-        end_id = self.selected_verteiler_2  # Endpunkt
+        if self.ui.radioButton_Abzweigung.isChecked():
+            if not (self.selected_parent_leerrohr and self.selected_verteiler and self.selected_verteiler_2):
+                self.ui.label_Status.setText("Bitte wähle Parent-Leerrohr, Start- und Endknoten der Abzweigung aus!")
+                self.ui.label_Status.setStyleSheet("background-color: lightcoral; color: white; font-weight: bold; padding: 5px;")
+                print("DEBUG: Status gesetzt: Fehlende Auswahl")
+                return
+            start_id = self.selected_verteiler
+            end_id = self.selected_verteiler_2
+            parent_id = self.selected_parent_leerrohr["id"]
 
-        # Prüfen, ob Werte vorhanden sind
-        if not start_id or not end_id:
-            self.ui.label_Status.setText("Bitte Start- und Endknoten auswählen!")
-            self.ui.label_Status.setStyleSheet("background-color: lightcoral; color: white; font-weight: bold; padding: 5px;")
-            return
+            try:
+                parent_vkg_lr = self.selected_parent_leerrohr["VKG_LR"]
+                parent_endknoten = self.selected_parent_leerrohr.get("ENDKNOTEN", None)
+                if start_id == parent_vkg_lr or (parent_endknoten and start_id == parent_endknoten):
+                    self.ui.label_Status.setText("Der Startknoten der Abzweigung darf nicht Start- oder Endknoten des Parent-Leerrohrs sein!")
+                    self.ui.label_Status.setStyleSheet("background-color: lightcoral; color: white; font-weight: bold; padding: 5px;")
+                    print("DEBUG: Status gesetzt: Startknoten ungültig")
+                    return
+                trassen_ids = self.selected_parent_leerrohr["ID_TRASSE"]
+                conn = self.get_database_connection()
+                with psycopg2.connect(**conn) as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            SELECT EXISTS (
+                                SELECT 1 
+                                FROM lwl."LWL_Trasse" 
+                                WHERE id = ANY(%s) 
+                                AND ("VONKNOTEN" = %s OR "NACHKNOTEN" = %s)
+                            )
+                        """, (trassen_ids, start_id, start_id))
+                        if not cur.fetchone()[0]:
+                            self.ui.label_Status.setText("Der Startknoten der Abzweigung muss auf einer Trasse des Parent-Leerrohrs liegen!")
+                            self.ui.label_Status.setStyleSheet("background-color: lightcoral; color: white; font-weight: bold; padding: 5px;")
+                            print("DEBUG: Status gesetzt: Startknoten nicht auf Parent-Trasse")
+                            return
+            except Exception as e:
+                self.ui.label_Status.setText(f"Fehler bei der Validierung des Startknotens: {e}")
+                self.ui.label_Status.setStyleSheet("background-color: lightcoral; color: white; font-weight: bold; padding: 5px;")
+                print(f"DEBUG: Validierungsfehler: {e}")
+                return
+        else:
+            if not (self.selected_verteiler and self.selected_verteiler_2):
+                self.ui.label_Status.setText("Bitte wähle Start- und Endknoten aus!")
+                self.ui.label_Status.setStyleSheet("background-color: lightcoral; color: white; font-weight: bold; padding: 5px;")
+                print("DEBUG: Status gesetzt: Fehlende Knoten")
+                return
+            start_id = self.selected_verteiler
+            end_id = self.selected_verteiler_2
+            parent_id = None
+
+            try:
+                conn = self.get_database_connection()
+                with psycopg2.connect(**conn) as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            SELECT "TYP" 
+                            FROM lwl."LWL_Knoten" 
+                            WHERE id = %s
+                        """, (start_id,))
+                        typ = cur.fetchone()
+                        if not typ or typ[0] not in ["Verteilerkasten", "Schacht", "Ortszentrale"]:
+                            self.ui.label_Status.setText("Der Startknoten des Hauptstrangs muss ein Verteiler, Schacht oder eine Ortszentrale sein!")
+                            self.ui.label_Status.setStyleSheet("background-color: lightcoral; color: white; font-weight: bold; padding: 5px;")
+                            print("DEBUG: Status gesetzt: Ungültiger Startknoten-Typ")
+                            return
+                        cur.execute("""
+                            SELECT "TYP" 
+                            FROM lwl."LWL_Knoten" 
+                            WHERE id = %s
+                        """, (end_id,))
+                        typ = cur.fetchone()
+                        if typ and typ[0] == "Virtueller Knoten":
+                            self.ui.label_Status.setText("Der Endknoten des Hauptstrangs darf kein virtueller Knoten sein!")
+                            self.ui.label_Status.setStyleSheet("background-color: lightcoral; color: white; font-weight: bold; padding: 5px;")
+                            print("DEBUG: Status gesetzt: Ungültiger Endknoten-Typ")
+                            return
+            except Exception as e:
+                self.ui.label_Status.setText(f"Fehler bei der Validierung der Knoten: {e}")
+                self.ui.label_Status.setStyleSheet("background-color: lightcoral; color: white; font-weight: bold; padding: 5px;")
+                print(f"DEBUG: Validierungsfehler: {e}")
+                return
 
         try:
             start_id = int(start_id)
@@ -433,17 +700,46 @@ class LeerrohrVerlegenTool(QDialog):
         except ValueError:
             self.ui.label_Status.setText("Knoten-IDs müssen Zahlen sein!")
             self.ui.label_Status.setStyleSheet("background-color: lightcoral; color: white; font-weight: bold; padding: 5px;")
+            print("DEBUG: Status gesetzt: Ungültige Knoten-IDs")
             return
 
         # 2️⃣ Routing-SQL-Query mit pgr_ksp für 3 kürzeste Pfade
-        sql_query = """
-            SELECT seq, path_id, edge FROM pgr_ksp(
-                'SELECT id, "VONKNOTEN" AS source, "NACHKNOTEN" AS target, "LAENGE" AS cost FROM lwl."LWL_Trasse"',
-                %s, %s,
-                3,
-                false
-            );
-        """
+        if self.ui.radioButton_Abzweigung.isChecked():
+            trassen_ids = set(self.selected_parent_leerrohr["ID_TRASSE"])
+            print(f"DEBUG: Ursprüngliche Trassen-IDs des Parent-Leerrohrs: {trassen_ids}")
+
+            if not trassen_ids:
+                self.ui.label_Status.setText("Keine Trassen-IDs im Parent-Leerrohr gefunden!")
+                self.ui.label_Status.setStyleSheet("background-color: lightcoral; color: white; font-weight: bold; padding: 5px;")
+                print("DEBUG: Status gesetzt: Keine Trassen-IDs")
+                return
+
+            trassen_ids_str = "{" + ",".join(map(str, trassen_ids)) + "}"
+            print(f"DEBUG: PostgreSQL-Array für ausgeschlossene Parent-Trassen-IDs: {trassen_ids_str}")
+
+            sql_query = f"""
+                SELECT seq, path_id, edge AS trasse_id
+                FROM pgr_ksp(
+                    'SELECT id, "VONKNOTEN" AS source, "NACHKNOTEN" AS target, "LAENGE" AS cost 
+                     FROM lwl."LWL_Trasse" 
+                     WHERE "LAENGE" IS NOT NULL AND "LAENGE" > 0 
+                     AND id NOT IN (SELECT unnest(''{trassen_ids_str}''::bigint[]))',
+                    %s, %s,
+                    3,
+                    false
+                );
+            """
+        else:
+            sql_query = """
+                SELECT seq, path_id, edge AS trasse_id
+                FROM pgr_ksp(
+                    'SELECT id, "VONKNOTEN" AS source, "NACHKNOTEN" AS target, "LAENGE" AS cost 
+                     FROM lwl."LWL_Trasse"',
+                    %s, %s,
+                    3,
+                    false
+                );
+            """
 
         # 3️⃣ Query ausführen
         try:
@@ -452,32 +748,26 @@ class LeerrohrVerlegenTool(QDialog):
             print(f"DEBUG: Ergebnis aus Datenbank: {result}")
 
             if not result or len(result) == 0:
-                self.ui.label_Status.setText("Kein Pfad gefunden!")
+                self.ui.label_Status.setText("Kein Pfad gefunden! Möglicherweise gibt es keine Route ohne Parent-Trassen.")
                 self.ui.label_Status.setStyleSheet("background-color: lightcoral; color: white; font-weight: bold; padding: 5px;")
+                print("DEBUG: Status gesetzt: Kein Pfad gefunden")
                 return
 
             # Gruppiere die Ergebnisse nach path_id (für echte alternative Routen)
             routes = {}
-            for seq, path_id, edge in result:
+            for seq, path_id, trasse_id in result:
                 if path_id not in routes:
                     routes[path_id] = []
-                if edge is not None and edge != -1:  # Ignoriere -1 (Ende des Pfads)
-                    routes[path_id].append(edge)
+                if trasse_id is not None and trasse_id != -1:  # Ignoriere -1 (Ende des Pfads)
+                    routes[path_id].append(trasse_id)
 
-            # Speichere die Routen als Liste von Listen für selected_trasse_ids und aktuelle Liste für Kompatibilität
-            self.selected_trasse_ids = list(routes.values())  # Liste von Listen: [[44437, 44452], [44438, 44439]]
-            self.selected_trasse_ids_flat = []  # Flache Liste für Kompatibilität mit anderen Methoden
-            for route in routes.values():
-                self.selected_trasse_ids_flat.extend(route)
+            # NEU: Setze nur die erste Route als Standard, synchronisiere flat
+            self.routes_by_path_id = routes  # Speichere alle Routen für die Auswahl
+            self.selected_trasse_ids = list(routes.values())  # Liste von Listen bleibt erhalten
+            self.selected_trasse_ids_flat = routes[1]  # Standardmäßig erste Route für den Import
+            print(f"DEBUG: Initial ausgewählte Route: {self.selected_trasse_ids_flat}")
 
-            # Speichere routes_by_path_id für die spätere Nutzung in highlight_selected_route
-            self.routes_by_path_id = routes
-
-            print(f"DEBUG: Gefundene Routen nach path_id: {routes}")
-            print(f"DEBUG: Nach Routing – selected_trasse_ids (als Liste von Listen): {self.selected_trasse_ids}")
-            print(f"DEBUG: Nach Routing – selected_trasse_ids_flat: {self.selected_trasse_ids_flat}")
-
-            # 4️⃣ Hebe alle Routen hervor (3 Farben)
+            # GEÄNDERT: Highlights für alle Routen, aber flat bleibt bei der Auswahl
             self.highlight_multiple_routes(list(routes.values()))
 
             # 5️⃣ Aktiviere MapTool zur Routenauswahl, wenn mehr als eine Route existiert
@@ -488,12 +778,14 @@ class LeerrohrVerlegenTool(QDialog):
                 self.ui.label_Status.setText("Route berechnet – Import möglich!")
             
             self.ui.label_Status.setStyleSheet("background-color: lightgreen; color: black; font-weight: bold; padding: 5px;")
+            print("DEBUG: Status gesetzt: Erfolgreiches Routing")
 
         except Exception as e:
             self.ui.label_Status.setText(f"Datenbankfehler: {e}")
             self.ui.label_Status.setStyleSheet("background-color: lightcoral; color: white; font-weight: bold; padding: 5px;")
+            print(f"DEBUG: Datenbankfehler: {e}")
             return
-        
+            
     def highlight_multiple_routes(self, routes):
         """Hebt eine oder mehrere Routen in unterschiedlichen Farben in QGIS hervor."""
         print(f"DEBUG: Anzahl der Routen zum Highlighten: {len(routes)}")
@@ -563,19 +855,20 @@ class LeerrohrVerlegenTool(QDialog):
                 for feature in layer.getFeatures():
                     if feature.geometry().distance(QgsGeometry.fromPointXY(point)) < 20:  # 20 Meter Toleranz
                         trassen_id = feature["id"]
-                        # Suche in allen Routen (verschachtelte Listen)
+                        # Suche in allen Routen
                         for path_id, route in self.routes_by_path_id.items():
-                            if trassen_id in route:  # Prüfe, ob trassen_id in einer der inneren Listen ist
-                                # Setze die gesamte Route für diesen path_id als selected_trasse_ids
+                            if trassen_id in route:
+                                # NEU: Setze beide Variablen auf die gewählte Route
                                 self.tool.selected_trasse_ids = route
+                                self.tool.selected_trasse_ids_flat = route  # Synchronisiere
                                 self.tool.highlight_selected_route()
                                 self.tool.iface.mapCanvas().unsetMapTool(self)
                                 self.tool.ui.label_Status.setText(f"Route {path_id} ausgewählt – Import möglich!")
                                 self.tool.ui.label_Status.setStyleSheet("background-color: lightgreen; color: black; font-weight: bold; padding: 5px;")
+                                print(f"DEBUG: Gewählte Route: {self.tool.selected_trasse_ids_flat}")
                                 
-                                # Aktualisiere die Verbundnummer basierend auf der ausgewählten Route
+                                # GEÄNDERT: Aktualisiere Verbundnummer nach Auswahl
                                 self.tool.populate_verbundnummer()
-                                
                                 return
                         break
                 self.tool.ui.label_Status.setText("Kein gültiger Pfad ausgewählt!")
@@ -655,13 +948,155 @@ class LeerrohrVerlegenTool(QDialog):
         print(f"DEBUG: Nach dem Entfernen - Anzahl der Routing-Highlights: {len(self.route_highlights)}")
 
     def select_parent_leerrohr(self):
-        """Dummy-Methode für den Button Parent-Leerrohr"""
-        QgsMessageLog.logMessage("Parent-Leerrohr Auswahl gedrückt, aber noch nicht implementiert.", "Leerrohr-Tool", level=Qgis.Warning)
-        
-    def select_knoten_abzweigung(self):
-        """Dummy-Methode für den Button Knoten-Abzweigung"""
-        QgsMessageLog.logMessage("Knoten-Abzweigung Auswahl gedrückt, aber noch nicht implementiert.", "Leerrohr-Tool", level=Qgis.Warning)
+        """Aktiviert das Map-Tool zum Auswählen eines Parent-Leerrohrs aus LWL_Leerrohr."""
+        print("DEBUG: Starte Auswahl eines Parent-Leerrohrs")
+        self.ui.label_Parent_Leerrohr.clear()  # Label zurücksetzen
 
+        # Falls das MapTool bereits aktiv ist, trennen
+        if self.map_tool:
+            try:
+                self.map_tool.canvasClicked.disconnect()
+            except TypeError:
+                pass
+
+        # Aktiviere MapTool zur Auswahl
+        self.map_tool = QgsMapToolEmitPoint(self.iface.mapCanvas())
+        self.map_tool.canvasClicked.connect(self.parent_leerrohr_selected)
+        self.iface.mapCanvas().setMapTool(self.map_tool)
+
+    def parent_leerrohr_selected(self, point):
+        """Speichert das gewählte Parent-Leerrohr und dessen Attribute."""
+        import time
+        start_time = time.time()
+
+        print("DEBUG: Verarbeite Auswahl des Parent-Leerrohrs")
+        layer_name = "LWL_Leerrohr"
+        layer = QgsProject.instance().mapLayersByName(layer_name)
+        if not layer:
+            self.ui.label_Parent_Leerrohr.setText("Layer 'LWL_Leerrohr' nicht gefunden")
+            self.ui.label_Parent_Leerrohr.setStyleSheet("background-color: lightcoral;")
+            return
+        layer = layer[0]
+
+        # Berechne Toleranz in Metern basierend auf 10 Pixeln und Maßstab
+        map_scale = self.iface.mapCanvas().scale()
+        dpi = 96  # Standard-DPI
+        meters_per_pixel = map_scale / (39.37 * dpi)
+        threshold_distance = 10 * meters_per_pixel
+
+        nearest_feature = None
+        nearest_distance = float("inf")
+
+        # Räumlicher Filter um den Klickpunkt
+        buffer = QgsGeometry.fromPointXY(point).buffer(threshold_distance, 8)
+        request = QgsFeatureRequest().setFilterRect(buffer.boundingBox())
+
+        feature_count = 0
+        for feature in layer.getFeatures(request):
+            feature_count += 1
+            distance = feature.geometry().distance(QgsGeometry.fromPointXY(point))
+            if distance < nearest_distance:
+                nearest_distance = distance
+                nearest_feature = feature
+
+        print(f"DEBUG: Anzahl gefilterter Features: {feature_count}")
+        print(f"DEBUG: Zeit für Auswahl: {time.time() - start_time} Sekunden")
+
+        if nearest_feature and nearest_distance <= threshold_distance:
+            leerrohr_id = nearest_feature["id"]
+            
+            # Initialisiere selected_parent_leerrohr neu, um alte Werte zu vermeiden
+            self.selected_parent_leerrohr = {}
+            
+            # Fülle selected_parent_leerrohr mit den Attributen des Features
+            for field in layer.fields():
+                field_name = field.name()
+                self.selected_parent_leerrohr[field_name] = nearest_feature[field_name] if field_name in nearest_feature else None
+            
+            # Setze explizit die relevanten Felder, falls sie nicht im Feature vorhanden sind, hole sie aus der Datenbank
+            try:
+                db_params = self.get_database_connection()
+                with psycopg2.connect(**db_params) as conn:
+                    with conn.cursor() as cur:
+                        cur.execute('SELECT "ID_TRASSE", "VERLEGT_AM", "VERBUNDNUMMER", "FARBSCHEMA", "GEFOERDERT", "SUBDUCT", "KOMMENTAR", "BESCHREIBUNG", "VONKNOTEN", "NACHKNOTEN", "COUNT" FROM lwl."LWL_Leerrohr" WHERE id = %s', (leerrohr_id,))
+                        result = cur.fetchone()
+                        if result:
+                            self.selected_parent_leerrohr["ID_TRASSE"] = result[0] if result[0] else []
+                            self.selected_parent_leerrohr["VERLEGT_AM"] = result[1] if result[1] else None
+                            self.selected_parent_leerrohr["VERBUNDNUMMER"] = result[2] if result[2] is not None else None
+                            self.selected_parent_leerrohr["FARBSCHEMA"] = result[3] if result[3] is not None else None
+                            self.selected_parent_leerrohr["GEFOERDERT"] = result[4] if result[4] is not None else None
+                            self.selected_parent_leerrohr["SUBDUCT"] = result[5] if result[5] is not None else None
+                            self.selected_parent_leerrohr["KOMMENTAR"] = result[6] if result[6] is not None else None
+                            self.selected_parent_leerrohr["BESCHREIBUNG"] = result[7] if result[7] is not None else None
+                            self.selected_parent_leerrohr["VONKNOTEN"] = result[8] if result[8] is not None else None
+                            self.selected_parent_leerrohr["NACHKNOTEN"] = result[9] if result[9] is not None else None
+                            self.selected_parent_leerrohr["COUNT"] = result[10] if result[10] is not None else None
+            except psycopg2.Error as e:
+                print(f"DEBUG: PostgreSQL-Fehler beim Abrufen von Feldern: {e}")
+                # Fallback-Werte, falls die Datenbankabfrage fehlschlägt
+                self.selected_parent_leerrohr["ID_TRASSE"] = [] if "ID_TRASSE" not in self.selected_parent_leerrohr else self.selected_parent_leerrohr["ID_TRASSE"]
+                self.selected_parent_leerrohr["VERLEGT_AM"] = None if "VERLEGT_AM" not in self.selected_parent_leerrohr else self.selected_parent_leerrohr["VERLEGT_AM"]
+                self.selected_parent_leerrohr["VERBUNDNUMMER"] = None if "VERBUNDNUMMER" not in self.selected_parent_leerrohr else self.selected_parent_leerrohr["VERBUNDNUMMER"]
+                self.selected_parent_leerrohr["FARBSCHEMA"] = None if "FARBSCHEMA" not in self.selected_parent_leerrohr else self.selected_parent_leerrohr["FARBSCHEMA"]
+                self.selected_parent_leerrohr["GEFOERDERT"] = None if "GEFOERDERT" not in self.selected_parent_leerrohr else self.selected_parent_leerrohr["GEFOERDERT"]
+                self.selected_parent_leerrohr["SUBDUCT"] = None if "SUBDUCT" not in self.selected_parent_leerrohr else self.selected_parent_leerrohr["SUBDUCT"]
+                self.selected_parent_leerrohr["KOMMENTAR"] = None if "KOMMENTAR" not in self.selected_parent_leerrohr else self.selected_parent_leerrohr["KOMMENTAR"]
+                self.selected_parent_leerrohr["BESCHREIBUNG"] = None if "BESCHREIBUNG" not in self.selected_parent_leerrohr else self.selected_parent_leerrohr["BESCHREIBUNG"]
+                self.selected_parent_leerrohr["VONKNOTEN"] = None if "VONKNOTEN" not in self.selected_parent_leerrohr else self.selected_parent_leerrohr["VONKNOTEN"]
+                self.selected_parent_leerrohr["NACHKNOTEN"] = None if "NACHKNOTEN" not in self.selected_parent_leerrohr else self.selected_parent_leerrohr["NACHKNOTEN"]
+                self.selected_parent_leerrohr["COUNT"] = None if "COUNT" not in self.selected_parent_leerrohr else self.selected_parent_leerrohr["COUNT"]
+
+            self.selected_parent_leerrohr["id"] = leerrohr_id
+
+            print(f"DEBUG: selected_parent_leerrohr vor Zuweisung: {self.selected_parent_leerrohr}")
+            print(f"DEBUG: Selected Parent-Leerrohr VERLEGT_AM: {self.selected_parent_leerrohr.get('VERLEGT_AM', 'Nicht vorhanden')}")
+            print(f"DEBUG: Selected Parent-Leerrohr ID_TRASSE: {self.selected_parent_leerrohr.get('ID_TRASSE', 'Nicht vorhanden')}")
+            print(f"DEBUG: Selected Parent-Leerrohr VERBUNDNUMMER: {self.selected_parent_leerrohr.get('VERBUNDNUMMER', 'Nicht vorhanden')}")
+            print(f"DEBUG: Selected Parent-Leerrohr FARBSCHEMA: {self.selected_parent_leerrohr.get('FARBSCHEMA', 'Nicht vorhanden')}")
+            print(f"DEBUG: Selected Parent-Leerrohr GEFOERDERT: {self.selected_parent_leerrohr.get('GEFOERDERT', 'Nicht vorhanden')}")
+            print(f"DEBUG: Selected Parent-Leerrohr SUBDUCT: {self.selected_parent_leerrohr.get('SUBDUCT', 'Nicht vorhanden')}")
+            print(f"DEBUG: Selected Parent-Leerrohr KOMMENTAR: {self.selected_parent_leerrohr.get('KOMMENTAR', 'Nicht vorhanden')}")
+            print(f"DEBUG: Selected Parent-Leerrohr BESCHREIBUNG: {self.selected_parent_leerrohr.get('BESCHREIBUNG', 'Nicht vorhanden')}")
+            print(f"DEBUG: Selected Parent-Leerrohr VONKNOTEN: {self.selected_parent_leerrohr.get('VONKNOTEN', 'Nicht vorhanden')}")
+            print(f"DEBUG: Selected Parent-Leerrohr NACHKNOTEN: {self.selected_parent_leerrohr.get('NACHKNOTEN', 'Nicht vorhanden')}")
+            print(f"DEBUG: Selected Parent-Leerrohr COUNT: {self.selected_parent_leerrohr.get('COUNT', 'Nicht vorhanden')}")
+            print(f"DEBUG: Full selected_parent_leerrohr: {self.selected_parent_leerrohr}")
+            print(f"DEBUG: Feature VERLEGT_AM: {nearest_feature['VERLEGT_AM'] if 'VERLEGT_AM' in nearest_feature else 'Nicht vorhanden'}")
+            print(f"DEBUG: Feature ID_TRASSE: {nearest_feature['ID_TRASSE'] if 'ID_TRASSE' in nearest_feature else 'Nicht vorhanden'}")
+            print(f"DEBUG: Feature VERBUNDNUMMER: {nearest_feature['VERBUNDNUMMER'] if 'VERBUNDNUMMER' in nearest_feature else 'Nicht vorhanden'}")
+            print(f"DEBUG: Feature FARBSCHEMA: {nearest_feature['FARBSCHEMA'] if 'FARBSCHEMA' in nearest_feature else 'Nicht vorhanden'}")
+            print(f"DEBUG: Feature GEFOERDERT: {nearest_feature['GEFOERDERT'] if 'GEFOERDERT' in nearest_feature else 'Nicht vorhanden'}")
+            print(f"DEBUG: Feature SUBDUCT: {nearest_feature['SUBDUCT'] if 'SUBDUCT' in nearest_feature else 'Nicht vorhanden'}")
+            print(f"DEBUG: Feature KOMMENTAR: {nearest_feature['KOMMENTAR'] if 'KOMMENTAR' in nearest_feature else 'Nicht vorhanden'}")
+            print(f"DEBUG: Feature BESCHREIBUNG: {nearest_feature['BESCHREIBUNG'] if 'BESCHREIBUNG' in nearest_feature else 'Nicht vorhanden'}")
+            print(f"DEBUG: Feature VONKNOTEN: {nearest_feature['VONKNOTEN'] if 'VONKNOTEN' in nearest_feature else 'Nicht vorhanden'}")
+            print(f"DEBUG: Feature NACHKNOTEN: {nearest_feature['NACHKNOTEN'] if 'NACHKNOTEN' in nearest_feature else 'Nicht vorhanden'}")
+            print(f"DEBUG: Feature COUNT: {nearest_feature['COUNT'] if 'COUNT' in nearest_feature else 'Nicht vorhanden'}")
+            print(f"DEBUG: Feature Felder: {[field.name() for field in layer.fields()]}")
+
+            self.ui.label_Parent_Leerrohr.setText(f"Parent-Leerrohr ID: {leerrohr_id}")
+            self.ui.label_Parent_Leerrohr.setStyleSheet("background-color: lightgreen;")
+
+            # Highlighting des gewählten Leerrohrs
+            if hasattr(self, "parent_highlight") and self.parent_highlight:
+                self.parent_highlight.hide()
+            self.parent_highlight = QgsHighlight(self.iface.mapCanvas(), nearest_feature.geometry(), layer)
+            self.parent_highlight.setColor(Qt.yellow)  # Gelb für Parent-Leerrohr
+            self.parent_highlight.setWidth(5)
+            self.parent_highlight.show()
+
+            QgsMessageLog.logMessage(f"Parent-Leerrohr gewählt: {leerrohr_id}", "Leerrohr-Tool", level=Qgis.Info)
+            
+            # Attribute übernehmen
+            self.update_verlegungsmodus()
+        else:
+            self.ui.label_Parent_Leerrohr.setText("Kein Leerrohr in Reichweite gefunden")
+            self.ui.label_Parent_Leerrohr.setStyleSheet("background-color: lightcoral;")
+
+        self.iface.mapCanvas().unsetMapTool(self.map_tool)
+        self.map_tool = None        
+        
     def update_combobox_states(self):
         """Aktiviert oder deaktiviert comboBox_Verbundnummer und comboBox_Farbschema basierend auf dem ausgewählten TYP, ohne den Inhalt zu überschreiben."""
         print("DEBUG: Starte update_combobox_states")
@@ -827,19 +1262,78 @@ class LeerrohrVerlegenTool(QDialog):
         subtyp_id = self.ui.comboBox_leerrohr_typ_2.currentData()
         return subtyp_id
 
-    def populate_gefoerdert_subduct(self):
-        """Füllt die Dropdowns für 'Gefördert' und 'Subduct' mit 'Ja' und 'Nein'."""
-        options = ["Ja", "Nein"]
+    def update_subduct_button(self):
+        """Aktiviert oder deaktiviert den Subduct-Button basierend auf der CheckBox."""
+        is_subduct = self.ui.checkBox_Subduct.isChecked()
+        self.ui.pushButton_subduct.setEnabled(is_subduct)
+        print(f"DEBUG: Subduct-Button aktiviert: {is_subduct}")
 
-        # Populate Gefördert
-        self.ui.comboBox_Gefoerdert.clear()
-        self.ui.comboBox_Gefoerdert.addItems(options)
-        self.ui.comboBox_Gefoerdert.setCurrentText("Nein")  # Setze die ComboBox auf "keine Auswahl"
+    def select_subduct_parent(self):
+        """Aktiviert das Map-Tool zum Auswählen eines Subduct-Parent-Leerrohrs."""
+        print("DEBUG: Starte Auswahl eines Subduct-Parent-Leerrohrs")
+        self.ui.label_Subduct.clear()  # Neues Label für Subduct zurücksetzen
 
-        # Populate Subduct
-        self.ui.comboBox_Subduct.clear()
-        self.ui.comboBox_Subduct.addItems(options)
-        self.ui.comboBox_Subduct.setCurrentText("Nein")  # Setze die ComboBox auf "keine Auswahl"
+        if self.map_tool:
+            try:
+                self.map_tool.canvasClicked.disconnect()
+            except TypeError:
+                pass
+
+        self.map_tool = QgsMapToolEmitPoint(self.iface.mapCanvas())
+        self.map_tool.canvasClicked.connect(self.subduct_parent_selected)
+        self.iface.mapCanvas().setMapTool(self.map_tool)
+
+    def subduct_parent_selected(self, point):
+        """Speichert das gewählte Subduct-Parent-Leerrohr."""
+        print("DEBUG: Verarbeite Auswahl des Subduct-Parent-Leerrohrs")
+        layer_name = "LWL_Leerrohr"
+        layer = QgsProject.instance().mapLayersByName(layer_name)
+        if not layer:
+            self.ui.label_Subduct.setText("Layer 'LWL_Leerrohr' nicht gefunden")
+            self.ui.label_Subduct.setStyleSheet("background-color: lightcoral;")
+            return
+        layer = layer[0]
+
+        map_scale = self.iface.mapCanvas().scale()
+        dpi = 96
+        meters_per_pixel = map_scale / (39.37 * dpi)
+        threshold_distance = 10 * meters_per_pixel
+
+        nearest_feature = None
+        nearest_distance = float("inf")
+
+        buffer = QgsGeometry.fromPointXY(point).buffer(threshold_distance, 8)
+        request = QgsFeatureRequest().setFilterRect(buffer.boundingBox())
+
+        for feature in layer.getFeatures(request):
+            distance = feature.geometry().distance(QgsGeometry.fromPointXY(point))
+            if distance < nearest_distance:
+                nearest_distance = distance
+                nearest_feature = feature
+
+        if nearest_feature and nearest_distance <= threshold_distance:
+            leerrohr_id = nearest_feature["id"]
+            self.selected_subduct_parent = leerrohr_id
+            self.ui.label_Subduct.setText(f"Subduct-Leerrohr ID: {leerrohr_id}")
+            self.ui.label_Subduct.setStyleSheet("background-color: lightgreen;")
+            
+            # Highlighting des Subduct-Parent-Leerrohrs
+            if hasattr(self, "subduct_highlight") and self.subduct_highlight:
+                self.subduct_highlight.hide()
+            self.subduct_highlight = QgsHighlight(self.iface.mapCanvas(), nearest_feature.geometry(), layer)
+            self.subduct_highlight.setColor(Qt.cyan)  # Cyan für Subduct
+            self.subduct_highlight.setWidth(5)
+            self.subduct_highlight.show()
+            print(f"DEBUG: Subduct-Parent-Leerrohr {leerrohr_id} hervorgehoben")
+
+            QgsMessageLog.logMessage(f"Subduct-Parent-Leerrohr gewählt: {leerrohr_id}", "Leerrohr-Tool", level=Qgis.Info)
+        else:
+            self.ui.label_Subduct.setText("Kein Leerrohr in Reichweite gefunden")
+            self.ui.label_Subduct.setStyleSheet("background-color: lightcoral;")
+            self.selected_subduct_parent = None
+
+        self.iface.mapCanvas().unsetMapTool(self.map_tool)
+        self.map_tool = None
 
     def populate_verbundnummer(self):
         """Setzt die Verbundnummer basierend auf dem ausgewählten Rohrtyp, dem Routing (falls vorhanden), und ermöglicht Auswahl mit flexibler Zählung."""
@@ -864,7 +1358,7 @@ class LeerrohrVerlegenTool(QDialog):
         self.ui.comboBox_Verbundnummer.setEnabled(True)
 
         # Prüfe, ob Routing-Daten vorhanden sind
-        if not self.selected_verteiler or not self.selected_trasse_ids:
+        if not self.selected_verteiler or not self.selected_trasse_ids_flat:  # Verwende selected_trasse_ids_flat
             # Wenn keine Routing-Daten vorhanden sind, zeige alle Nummern aktiv an
             print("DEBUG: Keine Routing-Daten vorhanden, zeige alle Nummern aktiv an")
             for nummer in range(1, 11):  # Zeige z. B. die Nummern 1–10 aktiv an
@@ -889,7 +1383,7 @@ class LeerrohrVerlegenTool(QDialog):
             )
             cur = conn.cursor()
 
-            trassen_ids_str = "{" + ",".join(map(str, set(self.selected_trasse_ids))) + "}"
+            trassen_ids_str = "{" + ",".join(map(str, set(self.selected_trasse_ids_flat))) + "}"  # Verwende selected_trasse_ids_flat
             print(f"DEBUG: SQL-Abfrage für Verbundnummern: SELECT DISTINCT \"VERBUNDNUMMER\" FROM lwl.\"LWL_Leerrohr\" WHERE \"TYP\" = 3 AND (\"VKG_LR\" = {self.selected_verteiler} OR \"ID_TRASSE\" && {trassen_ids_str}::bigint[]) AND \"VERBUNDNUMMER\" IS NOT NULL")
 
             cur.execute("""
@@ -936,7 +1430,12 @@ class LeerrohrVerlegenTool(QDialog):
                 cur.close()
             if conn:
                 conn.close()           
-                
+
+    def populate_gefoerdert_subduct(self):
+        """Setzt die CheckBoxen für 'Gefördert' und 'Subduct' auf Standardwerte."""
+        self.ui.checkBox_Foerderung.setChecked(False)  # Standard: Nicht gefördert
+        self.ui.checkBox_Subduct.setChecked(False)     # Standard: Kein Subduct
+
     def populate_farbschema(self):
         """Füllt die ComboBox für Farbschema basierend auf der gewählten Firma und Typ."""
         self.ui.comboBox_Farbschema.blockSignals(True)
@@ -1115,39 +1614,132 @@ class LeerrohrVerlegenTool(QDialog):
         typ_id = self.ui.comboBox_leerrohr_typ.currentData()  # Holt den aktuellen Leerrohr-Typ
         verbundnummer = self.ui.comboBox_Verbundnummer.currentText().strip()
 
+        # DEBUG: Logge grundlegende Informationen zur Nachverfolgung
+        print(f"DEBUG: Prüfe Daten – selected_verteiler: {self.selected_verteiler}, selected_verteiler_2: {self.selected_verteiler_2}")
+        print(f"DEBUG: Selected Trasse IDs: {self.selected_trasse_ids_flat}")
+
         # ✅ 1. Pflichtfelder für Hauptrohre und Multi-Rohre unterschiedlich behandeln
-        if typ_id == 3 and (not verbundnummer or not verbundnummer.isdigit()):
-            fehler.append("Keine gültige Verbundnummer für Multi-Rohr gewählt.")
-        elif typ_id != 3 and verbundnummer != "Deaktiviert":
-            fehler.append("Verbundnummer muss für Nicht-Multi-Rohre 0 sein.")
+        if self.ui.radioButton_Abzweigung.isChecked():
+            if not (self.selected_parent_leerrohr and self.selected_verteiler and self.selected_verteiler_2):
+                fehler.append("Bitte wähle Parent-Leerrohr, Start- und Endknoten der Abzweigung aus.")
+            # Prüfe, ob selected_verteiler auf parent_trasse_ids liegt
+            parent_trasse_ids = self.selected_parent_leerrohr["ID_TRASSE"]
+            trasse_ids_str = "{" + ",".join(str(int(id)) for id in parent_trasse_ids) + "}"
+            sql_query = f"""
+                SELECT COUNT(*) 
+                FROM lwl."LWL_Trasse" 
+                WHERE id = ANY('{trasse_ids_str}'::bigint[])
+                AND ("VONKNOTEN" = {self.selected_verteiler} OR "NACHKNOTEN" = {self.selected_verteiler})
+            """
+            result = self.db_execute(sql_query)
+            if not (result and result[0][0] > 0):
+                fehler.append("Der Startknoten der Abzweigung liegt nicht auf der Trasse des Parent-Leerrohrs.")
+        else:
+            if not (self.selected_verteiler and self.selected_verteiler_2):
+                fehler.append("Bitte wähle Start- und Endknoten aus.")
+            
+            if typ_id == 3 and (not verbundnummer or not verbundnummer.isdigit()):
+                fehler.append("Keine gültige Verbundnummer für Multi-Rohr gewählt.")
+            elif typ_id != 3 and verbundnummer != "Deaktiviert":
+                fehler.append("Verbundnummer muss für Nicht-Multi-Rohre 0 sein.")
+
+        # NEU: Prüfung der Trassen und des Endknotens (für beide Modi)
+        if hasattr(self, 'selected_trasse_ids_flat') and self.selected_trasse_ids_flat:
+            trassen_ids_list = list(set(self.selected_trasse_ids_flat))  # Entferne Duplikate
+            conn = None
+            cur = None
+            try:
+                db_details = self.get_database_connection()
+                conn = psycopg2.connect(**db_details)
+                cur = conn.cursor()
+
+                # 1. Hole alle Knoten der Trassen
+                cur.execute("""
+                    SELECT "VONKNOTEN", "NACHKNOTEN"
+                    FROM lwl."LWL_Trasse"
+                    WHERE id = ANY(%s)
+                """, (trassen_ids_list,))
+                trassen_knoten = cur.fetchall()
+                print(f"DEBUG: Trassen-Knoten: {trassen_knoten}")
+
+                # 2. Zähle Knoten-Vorkommen (ähnlich wie Trigger)
+                knoten_counts = {}
+                for von_knoten, nach_knoten in trassen_knoten:
+                    knoten_counts[von_knoten] = knoten_counts.get(von_knoten, 0) + 1
+                    knoten_counts[nach_knoten] = knoten_counts.get(nach_knoten, 0) + 1
+                print(f"DEBUG: Knoten-Zählung: {knoten_counts}")
+
+                # 3. Prüfe Start- und Endknoten
+                start_knoten = self.selected_verteiler
+                end_knoten = self.selected_verteiler_2
+                
+                if start_knoten not in knoten_counts:
+                    fehler.append(f"Startknoten {start_knoten} ist nicht mit den ausgewählten Trassen verbunden.")
+                if end_knoten not in knoten_counts:
+                    fehler.append(f"Endknoten {end_knoten} ist nicht mit den ausgewählten Trassen verbunden.")
+                elif knoten_counts[end_knoten] > 1 and end_knoten != start_knoten:
+                    fehler.append(f"Endknoten {end_knoten} kommt mehrfach vor und ist kein gültiger Endknoten.")
+                
+                # 4. Entferne alte Endknoten-Prüfung (wird jetzt durch die neue Logik ersetzt)
+                # Alte Prüfung entfernt:
+                # cur.execute("""
+                #     SELECT COUNT(*) 
+                #     FROM lwl."LWL_Trasse" 
+                #     WHERE id = ANY(%s) 
+                #     AND ("VONKNOTEN" = %s OR "NACHKNOTEN" = %s)
+                # """, (trassen_ids_list, self.selected_verteiler_2, self.selected_verteiler_2))
+                # if cur.fetchone()[0] == 0:
+                #     fehler.append("Kein gültiger Endknoten gefunden. Prüfen Sie die Verbindungen der Trassen.")
+
+            except Exception as e:
+                fehler.append(f"Datenbankfehler bei der Trassenprüfung: {e}")
+            finally:
+                if cur:
+                    cur.close()
+                if conn:
+                    conn.close()
+        else:
+            fehler.append("Keine Trassen ausgewählt.")
 
         # ✅ 2. Prüfe, ob bereits vergebene Verbundnummer gewählt wurde (nur für Multi-Rohr)
         vorhandene_verbundnummern = set()
 
         try:
             db_details = self.get_database_connection()
-            conn = psycopg2.connect(
-                dbname=db_details["dbname"],
-                user=db_details["user"],
-                password=db_details["password"],
-                host=db_details["host"],
-                port=db_details["port"]
-            )
+            conn = psycopg2.connect(**db_details)
             cur = conn.cursor()
 
-            if typ_id == 3:
-                cur.execute("""
-                    SELECT DISTINCT "VERBUNDNUMMER"
-                    FROM lwl."LWL_Leerrohr"
-                    WHERE "TYP" = 3 
-                    AND "VKG_LR" = %s
-                    AND "ID_TRASSE" && %s::bigint[];
-                """, (self.selected_verteiler, "{" + ",".join(map(str, set(self.selected_trasse_ids))) + "}"))
+            if self.ui.radioButton_Abzweigung.isChecked():
+                if typ_id == 3 and self.selected_parent_leerrohr and "VKG_LR" in self.selected_parent_leerrohr:
+                    cur.execute("""
+                        SELECT DISTINCT "VERBUNDNUMMER"
+                        FROM lwl."LWL_Leerrohr"
+                        WHERE "TYP" = 3 
+                        AND "VKG_LR" = %s
+                        AND "ID_TRASSE" && %s::bigint[];
+                    """, (self.selected_parent_leerrohr["VKG_LR"], "{" + ",".join(map(str, set(self.selected_trasse_ids_flat))) + "}"))
+                else:
+                    cur.execute("""
+                        SELECT DISTINCT "VERBUNDNUMMER"
+                        FROM lwl."LWL_Leerrohr"
+                        WHERE "TYP" = 3 
+                        AND "VKG_LR" = %s
+                        AND "ID_TRASSE" && %s::bigint[];
+                    """, (self.selected_verteiler, "{" + ",".join(map(str, set(self.selected_trasse_ids_flat))) + "}"))
+            else:
+                if typ_id == 3:
+                    cur.execute("""
+                        SELECT DISTINCT "VERBUNDNUMMER"
+                        FROM lwl."LWL_Leerrohr"
+                        WHERE "TYP" = 3 
+                        AND "VKG_LR" = %s
+                        AND "ID_TRASSE" && %s::bigint[];
+                    """, (self.selected_verteiler, "{" + ",".join(map(str, set(self.selected_trasse_ids_flat))) + "}"))
 
-                vorhandene_verbundnummern = {int(row[0]) for row in cur.fetchall() if row[0] is not None}
+            vorhandene_verbundnummern = {int(row[0]) for row in cur.fetchall() if row[0] is not None}
 
-                if verbundnummer and int(verbundnummer) in vorhandene_verbundnummern:
-                    fehler.append(f"Verbundnummer {verbundnummer} ist bereits vergeben.")
+            if verbundnummer and verbundnummer.isdigit() and int(verbundnummer) in vorhandene_verbundnummern:
+                fehler.append(f"Verbundnummer {verbundnummer} ist bereits vergeben.")
 
         except Exception as e:
             fehler.append(f"Datenbankfehler bei der Verbundnummer-Prüfung: {e}")
@@ -1158,7 +1750,7 @@ class LeerrohrVerlegenTool(QDialog):
                 conn.close()
 
         # ✅ 3. Prüfe, ob mindestens eine Trasse ausgewählt wurde
-        if not self.selected_trasse_ids:
+        if not hasattr(self, 'selected_trasse_ids_flat') or not self.selected_trasse_ids_flat:
             fehler.append("Keine Trassen ausgewählt.")
 
         # ✅ 4. Falls die Prüfung bestanden wurde → Import ermöglichen
@@ -1170,6 +1762,8 @@ class LeerrohrVerlegenTool(QDialog):
             self.ui.label_Status.setText("Prüfung erfolgreich. Import möglich.")
             self.ui.label_Status.setStyleSheet("background-color: lightgreen;")
             self.ui.pushButton_Import.setEnabled(True)
+
+        print(f"DEBUG: Prüfe Daten – selected_trasse_ids_flat: {self.selected_trasse_ids_flat}")
 
     def ordne_trassen(self, trassen_info):
         """Ordnet die Trassen basierend auf den Knoteninformationen und dem gewählten Verteilerkasten."""
@@ -1209,97 +1803,110 @@ class LeerrohrVerlegenTool(QDialog):
         return geordnete_trassen
 
     def importiere_daten(self):
-        """Importiert die Daten aus dem Formular in die Tabelle lwl.LWL_Leerrohr."""
+        """Importiert die Daten aus dem Formular in die Tabelle lwl.LWL_Leerrohr oder lwl.LWL_Leerrohr_Abzweigung."""
+        print("DEBUG: Starte importiere_daten")
         conn = None
         try:
+            print("DEBUG: Hole Datenbankverbindung")
             db_details = self.get_database_connection()
-            conn = psycopg2.connect(
-                dbname=db_details["dbname"],
-                user=db_details["user"],
-                password=db_details["password"],
-                host=db_details["host"],
-                port=db_details["port"]
-            )
+            conn = psycopg2.connect(**db_details)
             cur = conn.cursor()
             conn.autocommit = False
+            print("DEBUG: Datenbankverbindung erfolgreich")
 
-            # 🔹 Daten aus UI-Elementen abrufen
-            trassen_ids_pg_array = "{" + ",".join(map(str, set(self.selected_trasse_ids))) + "}"
-            verbundnummer = self.ui.comboBox_Verbundnummer.currentText().strip()
-            kommentar = self.ui.label_Kommentar.text().strip() or None
-            beschreibung = self.ui.label_Kommentar_2.text().strip() or None
-            farbschema = self.ui.comboBox_Farbschema.currentText().strip() or None
-            firma_hersteller = self.ui.comboBox_Firma.currentText().strip() or None
+            if self.ui.radioButton_Abzweigung.isChecked():
+                print("DEBUG: Abzweigungsmodus aktiviert")
+                trassen_ids_pg_array = "{" + ",".join(map(str, self.selected_trasse_ids_flat)) + "}"
+                count = self.selected_parent_leerrohr.get("COUNT", 0) or 0
+                status = "AKTIV"
+                verfuegbare_rohre = self.selected_parent_leerrohr.get("VERFUEGBARE_ROHRE", "{1,2,3}")
+                parent_id = self.selected_parent_leerrohr["id"]
+                hilfsknoten_id = self.selected_verteiler
+                nach_knoten = self.selected_verteiler_2
+                print(f"DEBUG: Abzweigung-Daten - Trassen: {trassen_ids_pg_array}, Parent: {parent_id}, Hilfsknoten: {hilfsknoten_id}, Nachknoten: {nach_knoten}")
 
-            # ❌ Falls "Deaktiviert" oder leer, setze Verbundnummer auf 0 für Nicht-Multi-Rohr, sonst behalte den Wert
-            if verbundnummer == "Deaktiviert" or not verbundnummer:
-                verbundnummer = "0" if self.ui.comboBox_leerrohr_typ.currentData() != 3 else None
-            elif not verbundnummer.isdigit():
-                raise ValueError(f"Ungültige Verbundnummer: {verbundnummer}")
+                cur.execute("""
+                    SELECT COUNT(*) FROM lwl."LWL_Leerrohr_Abzweigung" 
+                    WHERE "ID_PARENT_LEERROHR" = %s AND "ID_HILFSKNOTEN" = %s AND "NACHKNOTEN" = %s
+                """, (parent_id, hilfsknoten_id, nach_knoten))
+                exists = cur.fetchone()[0]
+                if exists > 0:
+                    raise Exception("Diese Abzweigung existiert bereits.")
 
-            # 🔹 Sammle Geometrien aller Trassen
-            cur.execute("""
-                SELECT "id", ST_AsText("geom")
-                FROM lwl."LWL_Trasse"
-                WHERE "id" = ANY(%s::bigint[])
-            """, (self.selected_trasse_ids,))
-            trassen_geometrien = cur.fetchall()
+                insert_query = """
+                INSERT INTO lwl."LWL_Leerrohr_Abzweigung" (
+                    "ID_PARENT_LEERROHR", "ID_HILFSKNOTEN", "ID_TRASSE", "COUNT", 
+                    "VERFUEGBARE_ROHRE", "STATUS"
+                ) VALUES (%s, %s, %s::bigint[], %s, %s, %s)
+                """
+                values = (parent_id, hilfsknoten_id, hilfsknoten_id, nach_knoten, trassen_ids_pg_array, count, verfuegbare_rohre, status)
+                cur.execute(insert_query, values)
+                print(f"DEBUG: Abzweigung eingefügt, Rows affected: {cur.rowcount}")
+            else:
+                print("DEBUG: Hauptstrang-Modus aktiviert")
+                trassen_ids_pg_array = "{" + ",".join(map(str, set(self.selected_trasse_ids_flat))) + "}"
+                verbundnummer = self.ui.comboBox_Verbundnummer.currentText().strip()
+                status = "aktiv"
+                gefoerdert = self.ui.checkBox_Foerderung.isChecked()
+                subduct = self.ui.checkBox_Subduct.isChecked()
+                parent_leerrohr_id = self.selected_subduct_parent if subduct else None
+                verfuegbare_rohre = "{1,2,3}"
+                typ = self.ui.comboBox_leerrohr_typ.currentData()
+                farbschema = self.ui.comboBox_Farbschema.currentText().strip()
+                subtyp_id = self.ui.comboBox_leerrohr_typ_2.currentData()
+                # NEU: VONKNOTEN und NACHKNOTEN direkt vorgeben
+                vonknoten = self.selected_verteiler
+                nachknoten = self.selected_verteiler_2
+                kommentar = self.ui.label_Kommentar.text().strip() or None
+                beschreibung = self.ui.label_Kommentar_2.text().strip() or None
+                verlegt_am = self.ui.mDateTimeEdit_Strecke.date().toString("yyyy-MM-dd")
 
-            # 🔹 Falls keine gültigen Geometrien → Fehler
-            if not trassen_geometrien or len(trassen_geometrien) != len(self.selected_trasse_ids):
-                self.ui.label_Status.setText("❌ Fehler: Nicht alle Trassen haben gültige Geometrien.")
-                self.ui.label_Status.setStyleSheet("background-color: lightcoral;")
-                return
+                print(f"DEBUG: Hauptstrang-Daten - Trassen: {trassen_ids_pg_array}, Verbundnummer: {verbundnummer}, Typ: {typ}, Farbschema: {farbschema}, Subtyp: {subtyp_id}, Von: {vonknoten}, Nach: {nachknoten}, Subduct: {subduct}, Kommentar: {kommentar}, Beschreibung: {beschreibung}, Verlegt_am: {verlegt_am}")
 
-            # 🔹 Verbinde Geometrien zu einer einzigen Linie
-            geometrien_wkt = ", ".join([f"ST_GeomFromText('{geom[1]}', 31254)" for geom in trassen_geometrien])
-            cur.execute(f"SELECT ST_AsText(ST_LineMerge(ST_Union(ARRAY[{geometrien_wkt}])))")
-            verbundene_geometrie = cur.fetchone()[0]
+                if verbundnummer == "Deaktiviert" or not verbundnummer:
+                    verbundnummer = "0" if typ != 3 else None
 
-            # 🔹 Einfügen der Daten in die Datenbank
-            insert_query = """
-            INSERT INTO lwl."LWL_Leerrohr" (
-                "ID_TRASSE", "TYP", "SUBTYP", "GEFOERDERT", "SUBDUCT", "VERBUNDNUMMER", 
-                "KOMMENTAR", "BESCHREIBUNG", "VERLEGT_AM", "FARBSCHEMA", "FIRMA_HERSTELLER", "VKG_LR", "geom"
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, ST_GeomFromText(%s, 31254))
-            """
-
-            cur.execute(insert_query, (
-                trassen_ids_pg_array,
-                self.ui.comboBox_leerrohr_typ.currentData(),
-                self.ui.comboBox_leerrohr_typ_2.currentData(),
-                'TRUE' if self.ui.comboBox_Gefoerdert.currentText() == "Ja" else 'FALSE',
-                'TRUE' if self.ui.comboBox_Subduct.currentText() == "Ja" else 'FALSE',
-                verbundnummer,  # 🔹 Falls None oder "Deaktiviert" → 0 für Nicht-Multi-Rohr
-                kommentar,
-                beschreibung,
-                self.ui.mDateTimeEdit_Strecke.date().toString("yyyy-MM-dd"),
-                farbschema,
-                firma_hersteller,
-                self.selected_verteiler,
-                verbundene_geometrie
-            ))
+                # GEÄNDERT: VONKNOTEN und NACHKNOTEN explizit in der INSERT-Abfrage vorgeben
+                insert_query = """
+                INSERT INTO lwl."LWL_Leerrohr" (
+                    "ID_TRASSE", "VERBUNDNUMMER", "VERFUEGBARE_ROHRE", "STATUS", "VKG_LR", 
+                    "GEFOERDERT", "SUBDUCT", "PARENT_LEERROHR_ID", "TYP", "FARBSCHEMA", "SUBTYP", 
+                    "VONKNOTEN", "NACHKNOTEN", "KOMMENTAR", "BESCHREIBUNG", "VERLEGT_AM"
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """
+                values = (
+                    trassen_ids_pg_array, verbundnummer, verfuegbare_rohre, status, vonknoten,
+                    gefoerdert, subduct, parent_leerrohr_id, typ, farbschema, subtyp_id,
+                    vonknoten, nachknoten, kommentar, beschreibung, verlegt_am
+                )
+                cur.execute(insert_query, values)
+                print(f"DEBUG: Hauptstrang eingefügt, Rows affected: {cur.rowcount}")
 
             conn.commit()
+            print("DEBUG: Commit erfolgreich")
             self.iface.messageBar().pushMessage("Erfolg", "Daten erfolgreich importiert.", level=Qgis.Success)
-
-            # 🔹 Formular zurücksetzen basierend auf Mehrfachimport-Checkbox
             self.initialisiere_formular()
 
+        except psycopg2.Error as e:
+            if conn:
+                conn.rollback()
+            self.iface.messageBar().pushMessage("Fehler", f"Datenbankfehler: {str(e)}", level=Qgis.Critical)
+            print(f"DEBUG: Datenbankfehler: {str(e)}")
         except Exception as e:
             if conn:
                 conn.rollback()
-            self.iface.messageBar().pushMessage("Fehler", f"Import fehlgeschlagen: {str(e)}", level=Qgis.Critical)
+            self.iface.messageBar().pushMessage("Fehler", f"Allgemeiner Fehler: {str(e)}", level=Qgis.Critical)
+            print(f"DEBUG: Allgemeiner Fehler: {str(e)}")
 
         finally:
             if conn:
                 conn.close()
+                print("DEBUG: Verbindung geschlossen")
 
-        # 🔹 Karte aktualisieren, damit neue Daten sichtbar sind
         layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr")[0]
         if layer:
             layer.triggerRepaint()
-
+            print("DEBUG: Layer aktualisiert")
     def initialisiere_formular(self):
         """Setzt das Formular zurück, entfernt vorhandene Highlights, es sei denn, Mehrfachimport ist aktiviert."""
         print("DEBUG: Starte initialisiere_formular")
@@ -1334,13 +1941,18 @@ class LeerrohrVerlegenTool(QDialog):
                 self.verteiler_highlight_2.hide()
                 self.verteiler_highlight_2 = None
 
+            # 5️⃣ Zurücksetzen von Trassen-IDs
+            self.selected_trasse_ids = []
+            self.selected_trasse_ids_flat = []
+
             self.ui.label_Status.clear()
             self.ui.label_Status.setStyleSheet("")
 
-            self.ui.comboBox_Gefoerdert.setCurrentIndex(-1)
-            self.ui.comboBox_Subduct.setCurrentIndex(-1)
+            # Korrigierte CheckBoxen statt ComboBoxen
+            self.ui.checkBox_Foerderung.setChecked(False)  # Standard: Nicht gefördert
+            self.ui.checkBox_Subduct.setChecked(False)     # Standard: Kein Subduct
 
-            # 5️⃣ Debug-Ausgabe: Nach dem Entfernen
+            # 6️⃣ Debug-Ausgabe: Nach dem Entfernen
             if hasattr(self, "route_highlights"):
                 print(f"DEBUG: Anzahl der Highlights NACH Reset: {len(self.route_highlights)}")
 
@@ -1358,7 +1970,6 @@ class LeerrohrVerlegenTool(QDialog):
             self.ui.pushButton_Import.setEnabled(True)  # Import bleibt aktiviert für weitere Imports
 
     def clear_trasse_selection(self):
-                
         # Setze Default-Werte für Label und Felder
         self.ui.label_gewaehlter_verteiler.setText("Verteiler wählen!")
         self.ui.label_gewaehlter_verteiler.setStyleSheet("background-color: lightcoral;")
@@ -1371,7 +1982,7 @@ class LeerrohrVerlegenTool(QDialog):
         
         self.selected_verteiler = None  # Sicherstellen, dass der Wert zurückgesetzt wird
         self.selected_verteiler_2 = None  # Sicherstellen, dass der Wert zurückgesetzt wird
-                    
+                        
         # Entferne das Highlight für den Verteilerkasten
         if hasattr(self, "verteiler_highlight_1") and self.verteiler_highlight_1:
             self.verteiler_highlight_1.hide()
@@ -1384,15 +1995,21 @@ class LeerrohrVerlegenTool(QDialog):
         self.ui.label_Status.clear()
         self.ui.label_Status.setStyleSheet("")
 
-        self.ui.comboBox_Gefoerdert.setCurrentIndex(-1)
-        self.ui.comboBox_Subduct.setCurrentIndex(-1)
+        # Korrigierte CheckBoxen statt ComboBoxen
+        self.ui.checkBox_Foerderung.setChecked(False)  # Standard: Nicht gefördert
+        self.ui.checkBox_Subduct.setChecked(False)     # Standard: Kein Subduct
+        
         self.ui.comboBox_Verbundnummer.setCurrentIndex(-1)
         self.ui.pushButton_Import.setEnabled(False)
         
         # 3️⃣ Routing-Highlights entfernen
         self.clear_routing()
 
-        # 4️⃣ Debug-Ausgabe: Nach dem Entfernen
+        # 4️⃣ Zurücksetzen von Trassen-IDs
+        self.selected_trasse_ids = []
+        self.selected_trasse_ids_flat = []
+
+        # 5️⃣ Debug-Ausgabe: Nach dem Entfernen
         if hasattr(self, "route_highlights"):
             print(f"DEBUG: Anzahl der Highlights NACH Reset: {len(self.route_highlights)}")
 
@@ -1400,10 +2017,40 @@ class LeerrohrVerlegenTool(QDialog):
 
     def close_tool(self):
         """Schließt das Tool und löscht alle Highlights."""
+        print("DEBUG: Schließe Tool und entferne alle Highlights")
         self.clear_trasse_selection()
         if self.map_tool:
             self.iface.mapCanvas().unsetMapTool(self.map_tool)
             self.map_tool = None
+        
+        if hasattr(self, "verteiler_highlight_1") and self.verteiler_highlight_1:
+            self.verteiler_highlight_1.hide()
+            self.verteiler_highlight_1 = None
+            print("DEBUG: Startknoten-Highlight entfernt")
+        
+        if hasattr(self, "verteiler_2_highlight") and self.verteiler_2_highlight:
+            self.verteiler_2_highlight.hide()
+            self.verteiler_2_highlight = None
+            print("DEBUG: Endknoten-Highlight entfernt")
+        
+        if hasattr(self, "parent_highlight") and self.parent_highlight:
+            self.parent_highlight.hide()
+            self.parent_highlight = None
+            print("DEBUG: Parent-Leerrohr-Highlight entfernt")
+        
+        if hasattr(self, "subduct_highlight") and self.subduct_highlight:
+            self.subduct_highlight.hide()
+            self.subduct_highlight = None
+            print("DEBUG: Subduct-Parent-Highlight entfernt")
+        
+        if hasattr(self, "route_highlights") and self.route_highlights:
+            for highlight in self.route_highlights:
+                highlight.hide()
+            self.route_highlights.clear()
+            print("DEBUG: Alle Routing-Highlights entfernt")
+
+        self.selected_trasse_ids = []
+        self.selected_trasse_ids_flat = []
         self.close()
 
     def closeEvent(self, event):
