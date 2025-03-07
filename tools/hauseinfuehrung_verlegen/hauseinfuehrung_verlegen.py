@@ -269,7 +269,7 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
                 # Extrahiere die Werte des ausgewählten Leerrohrs
                 leerrohr_id = selected_features[0]["id"]
                 subtyp_id = selected_features[0]["SUBTYP"]
-                farbschema = selected_features[0]["FARBSCHEMA"]
+                farbschema = selected_features[0]["CODIERUNG"]
                 firma = selected_features[0]["FIRMA_HERSTELLER"]  # Hersteller aus dem Feature ablesen
 
                 # Speichere die Informationen
@@ -480,7 +480,7 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
             query = """
                 SELECT "ROHRNUMMER", "FARBCODE", "id"
                 FROM "lwl"."LUT_Rohr_Beschreibung"
-                WHERE "ID_SUBTYP" = %s AND "FARBSCHEMA" = %s AND "FIRMA" = %s
+                WHERE "ID_SUBTYP" = %s AND "CODIERUNG" = %s AND "FIRMA" = %s
                 ORDER BY "ROHRNUMMER" ASC
             """
             cur.execute(query, (subtyp_id, farbschema, firma))

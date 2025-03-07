@@ -31,7 +31,7 @@ class LeerrohrVerlegenTool(QDialog):
         # Map-Tool-Variablen und Trassen-Listen
         self.map_tool = None
         self.selected_trasse_ids = []
-        self.selected_trasse_ids_flat = []  # Hinzugefügt, um den Fehler zu beheben
+        self.selected_trasse_ids_flat = []
         self.trasse_highlights = []
         self.verteiler_highlight_1 = None
         self.verteiler_highlight_2 = None
@@ -193,6 +193,8 @@ class LeerrohrVerlegenTool(QDialog):
 
             self.ui.pushButton_Parent_Leerrohr.setEnabled(True)
             self.ui.label_Parent_Leerrohr.setEnabled(True)
+            self.ui.label_Parent_Leerrohr.setStyleSheet("background-color: lightcoral;")
+
             self.ui.pushButton_verteiler.setText("Startknoten Abzweigung")
             self.ui.pushButton_verteiler_2.setText("Endknoten Abzweigung")
 
@@ -207,6 +209,9 @@ class LeerrohrVerlegenTool(QDialog):
             self.ui.label_Kommentar.setEnabled(False)
             self.ui.label_Kommentar_2.setEnabled(False)
             self.ui.mDateTimeEdit_Strecke.setEnabled(False)
+
+            # Formular initialisieren für Abzweigung
+            self.clear_trasse_selection()
 
             # Falls Parent-Leerrohr gewählt wurde → Werte übernehmen
             if self.selected_parent_leerrohr:
@@ -287,13 +292,19 @@ class LeerrohrVerlegenTool(QDialog):
             self.ui.checkBox_Foerderung.setEnabled(True)
             self.ui.checkBox_Subduct.setEnabled(True)
             self.ui.pushButton_subduct.setEnabled(self.ui.checkBox_Subduct.isChecked())  # Subduct-Button abhängig von CheckBox
-            self.ui.label_Subduct.setEnabled(True)  # Subduct-Label aktivieren
+            self.ui.label_Subduct.setEnabled(self.ui.checkBox_Subduct.isChecked())  # Subduct-Label abhängig von CheckBox
             self.ui.label_Kommentar.setEnabled(True)
             self.ui.label_Kommentar_2.setEnabled(True)
             self.ui.mDateTimeEdit_Strecke.setEnabled(True)
 
+            # Formular initialisieren für Hauptstrang
+            self.clear_trasse_selection()
+
             # Firma-ComboBox wird nur aktiviert, wenn update_combobox_states() es erlaubt
             self.update_combobox_states()
+
+            # Aktualisiere Subduct-Status basierend auf der Checkbox
+            self.update_subduct_button()
             
     def select_verteiler(self):
         """Aktiviert das Map-Tool zum Auswählen des ersten Knotens (Startknoten oder Start der Abzweigung)."""
@@ -1120,41 +1131,52 @@ class LeerrohrVerlegenTool(QDialog):
             self.ui.comboBox_Firma.setEnabled(False)
 
     def populate_leerrohr_typen(self):
-        """Füllt die Dropdown-Liste für Leerrohrtypen mit erweitertem Debugging."""
+        """Lädt alle Leerrohrtypen aus LUT_Leerrohr_Typ in das Dropdown."""
         print("DEBUG: Starte populate_leerrohr_typen")
+        self.ui.comboBox_leerrohr_typ.blockSignals(True)
+        self.ui.comboBox_leerrohr_typ.clear()
+        self.ui.comboBox_leerrohr_typ.setEnabled(True)  # Immer aktiviert
+
         db_details = self.get_database_connection()
-        conn = psycopg2.connect(
-            dbname=db_details["dbname"],
-            user=db_details["user"],
-            password=db_details["password"],
-            host=db_details["host"],
-            port=db_details["port"]
-        )
-        cur = conn.cursor()
+        conn = None
+        cur = None
+
         try:
-            print("DEBUG: Führe SQL-Abfrage aus: SELECT \"WERT\", \"TYP\" FROM lwl.\"LUT_Leerrohr_Typ\" WHERE \"WERT\" IN (1, 2, 3)")
-            cur.execute('SELECT "WERT", "TYP" FROM lwl."LUT_Leerrohr_Typ" WHERE "WERT" IN (1, 2, 3)')
-            rows = cur.fetchall()
+            conn = psycopg2.connect(
+                dbname=db_details["dbname"],
+                user=db_details["user"],
+                password=db_details["password"],
+                host=db_details["host"],
+                port=db_details["port"]
+            )
+            cur = conn.cursor()
 
-            print(f"DEBUG: Gefundene Leerrohrtypen aus LUT_Leerrohr_Typ: {rows}")
+            print("DEBUG: Führe SQL-Abfrage aus: SELECT \"id\", \"TYP\" FROM lwl.\"LUT_Leerrohr_Typ\" WHERE \"id\" IN (1, 2, 3)")
+            cur.execute("SELECT \"id\", \"TYP\" FROM lwl.\"LUT_Leerrohr_Typ\" WHERE \"id\" IN (1, 2, 3)")
+            typen = cur.fetchall()
+            print(f"DEBUG: Gefundene Leerrohrtypen aus LUT_Leerrohr_Typ: {typen}")
 
-            self.ui.comboBox_leerrohr_typ.clear()
-            for row in rows:
-                wert, typ = row
-                print(f"DEBUG: Hinzufügen zu Dropdown – Wert: {wert}, Typ: {typ}")
-                self.ui.comboBox_leerrohr_typ.addItem(typ, wert)
+            for typ_id, typ_name in typen:
+                print(f"DEBUG: Hinzufügen zu Dropdown – ID: {typ_id}, Typ: {typ_name}")
+                self.ui.comboBox_leerrohr_typ.addItem(typ_name, typ_id)  # Setze die ID als data
 
-            print(f"DEBUG: Aktueller Index nach Befüllen: {self.ui.comboBox_leerrohr_typ.currentIndex()}")
-            self.ui.comboBox_leerrohr_typ.setCurrentIndex(-1)
+            # Setze den Standardwert oder behalte den vorherigen Typ
+            if self.ui.comboBox_leerrohr_typ.count() > 0:
+                self.ui.comboBox_leerrohr_typ.setCurrentIndex(0)  # Standard: Erster Typ
+                self.update_selected_leerrohr_typ()  # Aktualisiere sofort
 
         except Exception as e:
-            self.ui.label_Status.setText(f"Fehler beim Abrufen der Leerrohrtypen: {e}")
+            self.ui.label_Status.setText(f"Fehler beim Laden der Leerrohrtypen: {e}")
             self.ui.label_Status.setStyleSheet("background-color: lightcoral;")
             print(f"DEBUG: Fehler bei der Abfrage der Leerrohrtypen: {e}")
+
         finally:
-            print("DEBUG: Schließe Datenbankverbindung")
-            cur.close()
-            conn.close()
+            if cur:
+                cur.close()
+            if conn:
+                conn.close()
+
+        self.ui.comboBox_leerrohr_typ.blockSignals(False)
 
     def update_selected_leerrohr_typ(self):
         """Aktualisiert das Label für den gewählten Typ und ruft populate_verbundnummer auf, unabhängig vom Typ."""
@@ -1165,33 +1187,28 @@ class LeerrohrVerlegenTool(QDialog):
             print(f"DEBUG: Gewählter Typ – Text: {typ_text}, Data: {selected_typ}")
             self.ui.label_gewaehltes_leerrohr.setText(typ_text)
             
-            # Rufe populate_verbundnummer immer auf, unabhängig vom Typ
+            # Rufe populate_verbundnummer immer auf, unabhängig vom Typ (berücksichtigt Codierung indirekt über andere Methoden)
             self.populate_verbundnummer()
         else:
             self.ui.label_gewaehltes_leerrohr.clear()
             print("DEBUG: Kein Typ ausgewählt, Label geleert")
 
     def populate_leerrohr_subtypen(self):
-        """Füllt die ComboBox für Leerrohr-Subtypen basierend auf Typ, Farbschema und Firma."""
+        """Füllt die ComboBox für Leerrohr-Subtypen basierend auf Typ, Firma und Codierung, mit IDs und Textwerten aus der DB-Struktur."""
         self.ui.comboBox_leerrohr_typ_2.blockSignals(True)
         self.ui.comboBox_leerrohr_typ_2.clear()
         self.ui.comboBox_leerrohr_typ_2.setEnabled(False)
         
-        # 🚨 NEUER FIX: Label für Subtyp sofort leeren, wenn kein Typ gewählt wurde
+        # Label für Subtyp leeren, wenn kein Typ gewählt wurde
         self.ui.label_gewaehltes_leerrohr_2.clear()
 
-        typ_id = self.ui.comboBox_leerrohr_typ.currentData()
-        farbschema = self.ui.comboBox_Farbschema.currentText().strip()
-        firma = self.ui.comboBox_Firma.currentText().strip()
+        firma = self.ui.comboBox_Firma.currentData()  # Textwert (z. B. "Gabocom")
+        typ_id = self.ui.comboBox_leerrohr_typ.currentData()  # Numerische ID_TYP (z. B. 3)
+        codierung_id = self.ui.comboBox_Farbschema.currentData()  # Numerische ID_CODIERUNG (z. B. 1)
 
-        # 🚨 Falls kein Typ gewählt ist, brich die Methode sofort ab!
-        if not typ_id:
-            self.ui.comboBox_leerrohr_typ_2.addItem("Bitte zuerst einen Typ wählen")
-            self.ui.comboBox_leerrohr_typ_2.blockSignals(False)
-            return
-
-        if not farbschema or not firma:
-            self.ui.comboBox_leerrohr_typ_2.addItem("Bitte Farbschema wählen")
+        # Prüfe, ob alle Werte vorhanden sind
+        if not firma or not typ_id or not codierung_id:
+            self.ui.comboBox_leerrohr_typ_2.addItem("Bitte Firma, Typ und Codierung wählen")
             self.ui.comboBox_leerrohr_typ_2.blockSignals(False)
             return
 
@@ -1209,27 +1226,28 @@ class LeerrohrVerlegenTool(QDialog):
             )
             cur = conn.cursor()
 
-            # Lade alle Subtypen für Typ + Firma + Farbschema
+            # Lade alle Subtypen für Typ-ID + Firma-Text + Codierung-ID
+            print("DEBUG: Lade Subtypen mit IDs und Text – FIRMA: %s, ID_TYP: %s, ID_CODIERUNG: %s" % (firma, typ_id, codierung_id))
             cur.execute("""
-                SELECT "id", "SUBTYP_char"
+                SELECT "id", "SUBTYP_char", "BEZEICHNUNG"
                 FROM lwl."LUT_Leerrohr_SubTyp"
-                WHERE "FARBSCHEMA" = %s AND "FIRMA" = %s AND "ID_TYP" = %s;
-            """, (farbschema, firma, typ_id))
+                WHERE "FIRMA" = %s AND "ID_TYP" = %s AND "ID_CODIERUNG" = %s;
+            """, (firma, typ_id, codierung_id))
 
             rows = cur.fetchall()
 
             if rows:
                 self.ui.comboBox_leerrohr_typ_2.setEnabled(True)
                 for row in rows:
-                    self.ui.comboBox_leerrohr_typ_2.addItem(row[1], row[0])
+                    subtyp_id, subtyp_char, bezeichnung = row
+                    self.ui.comboBox_leerrohr_typ_2.addItem(f"{subtyp_char} - {bezeichnung}", subtyp_id)
 
-                # 🚀 Qt-Trick: Damit der erste Wert immer wählbar ist
+                # Qt-Trick: Stelle sicher, dass der erste Wert wählbar ist
                 self.ui.comboBox_leerrohr_typ_2.setCurrentIndex(-1)
                 self.ui.comboBox_leerrohr_typ_2.setCurrentIndex(0)
 
-                # 🚀 Direkt das Label für den gewählten Subtyp aktualisieren
+                # Aktualisiere das Label für den gewählten Subtyp (Text anzeigen)
                 self.ui.label_gewaehltes_leerrohr_2.setText(self.ui.comboBox_leerrohr_typ_2.currentText())
-
             else:
                 self.ui.comboBox_leerrohr_typ_2.addItem("Keine Subtypen verfügbar")
 
@@ -1245,31 +1263,33 @@ class LeerrohrVerlegenTool(QDialog):
 
         self.ui.comboBox_leerrohr_typ_2.blockSignals(False)
 
-    def update_selected_leerrohr_subtyp(self):
-        """Aktualisiert das Label für den gewählten Subtyp."""
-        subtyp_text = self.ui.comboBox_leerrohr_typ_2.currentText()
-        if subtyp_text and self.ui.comboBox_leerrohr_typ_2.currentIndex() >= 0:
-            self.ui.label_gewaehltes_leerrohr_2.setText(subtyp_text)
-        else:
-            self.ui.label_gewaehltes_leerrohr_2.clear()
-
     def get_selected_subtyp_id(self):
+        """Ruft die ID des ausgewählten Subtyps ab, basierend auf Codierung und Subtypen aus LUT_Leerrohr_SubTyp."""
+        print("DEBUG: Starte get_selected_subtyp_id")
         # Prüfe, ob eine Auswahl getroffen wurde
         if self.ui.comboBox_leerrohr_typ_2.currentIndex() == -1:
             raise ValueError("Kein Subtyp ausgewählt.")
         
         # Abrufen der ID des ausgewählten Subtyps
         subtyp_id = self.ui.comboBox_leerrohr_typ_2.currentData()
+        print(f"DEBUG: Ausgewählte Subtyp-ID: {subtyp_id}")
         return subtyp_id
 
     def update_subduct_button(self):
-        """Aktiviert oder deaktiviert den Subduct-Button basierend auf der CheckBox."""
+        """Aktiviert oder deaktiviert den Subduct-Button und das Subduct-Label basierend auf der CheckBox, unabhängig von Codierung."""
+        print("DEBUG: Starte update_subduct_button")
         is_subduct = self.ui.checkBox_Subduct.isChecked()
         self.ui.pushButton_subduct.setEnabled(is_subduct)
-        print(f"DEBUG: Subduct-Button aktiviert: {is_subduct}")
+        self.ui.label_Subduct.setEnabled(is_subduct)  # Subduct-Label nur aktiv, wenn CheckBox angeklickt
+        self.ui.label_Subduct.setText("Hauptrohr auswählen")
+        if is_subduct:
+            self.ui.label_Subduct.setStyleSheet("background-color: lightcoral;")
+        else:
+            self.ui.label_Subduct.setStyleSheet("background-color: ;")  # Oder "" für Standard-QT-Styling
+        print(f"DEBUG: Subduct-Button und -Label aktiviert: {is_subduct}")
 
     def select_subduct_parent(self):
-        """Aktiviert das Map-Tool zum Auswählen eines Subduct-Parent-Leerrohrs."""
+        """Aktiviert das Map-Tool zum Auswählen eines Subduct-Parent-Leerrohrs, unabhängig von Codierung."""
         print("DEBUG: Starte Auswahl eines Subduct-Parent-Leerrohrs")
         self.ui.label_Subduct.clear()  # Neues Label für Subduct zurücksetzen
 
@@ -1284,7 +1304,7 @@ class LeerrohrVerlegenTool(QDialog):
         self.iface.mapCanvas().setMapTool(self.map_tool)
 
     def subduct_parent_selected(self, point):
-        """Speichert das gewählte Subduct-Parent-Leerrohr."""
+        """Speichert das gewählte Subduct-Parent-Leerrohr, unabhängig von Codierung."""
         print("DEBUG: Verarbeite Auswahl des Subduct-Parent-Leerrohrs")
         layer_name = "LWL_Leerrohr"
         layer = QgsProject.instance().mapLayersByName(layer_name)
@@ -1336,7 +1356,7 @@ class LeerrohrVerlegenTool(QDialog):
         self.map_tool = None
 
     def populate_verbundnummer(self):
-        """Setzt die Verbundnummer basierend auf dem ausgewählten Rohrtyp, dem Routing (falls vorhanden), und ermöglicht Auswahl mit flexibler Zählung."""
+        """Setzt die Verbundnummer basierend auf dem ausgewählten Rohrtyp, dem Routing (falls vorhanden), und ermöglicht Auswahl mit flexibler Zählung, berücksichtigt Codierung indirekt über Subtypen."""
         print("DEBUG: Starte populate_verbundnummer")
         self.ui.comboBox_Verbundnummer.clear()
 
@@ -1429,12 +1449,14 @@ class LeerrohrVerlegenTool(QDialog):
             if cur:
                 cur.close()
             if conn:
-                conn.close()           
+                conn.close()                  
 
     def populate_gefoerdert_subduct(self):
-        """Setzt die CheckBoxen für 'Gefördert' und 'Subduct' auf Standardwerte."""
+        """Setzt die CheckBoxen für 'Gefördert' und 'Subduct' auf Standardwerte, unabhängig von Codierung."""
+        print("DEBUG: Starte populate_gefoerdert_subduct")
         self.ui.checkBox_Foerderung.setChecked(False)  # Standard: Nicht gefördert
         self.ui.checkBox_Subduct.setChecked(False)     # Standard: Kein Subduct
+        print("DEBUG: CheckBoxen für 'Gefördert' und 'Subduct' auf False gesetzt")
 
     def populate_farbschema(self):
         """Füllt die ComboBox für Farbschema basierend auf der gewählten Firma und Typ."""
@@ -1442,8 +1464,8 @@ class LeerrohrVerlegenTool(QDialog):
         self.ui.comboBox_Farbschema.clear()
         self.ui.comboBox_Farbschema.setEnabled(False)
 
-        firma = self.ui.comboBox_Firma.currentText().strip()
-        typ_id = self.ui.comboBox_leerrohr_typ.currentData()
+        firma = self.ui.comboBox_Firma.currentData()  # Textwert (z. B. "Gabocom")
+        typ_id = self.ui.comboBox_leerrohr_typ.currentData()  # Numerische ID_TYP (z. B. 3)
 
         if not firma or not typ_id:
             self.ui.comboBox_Farbschema.addItem("Bitte Firma wählen")
@@ -1464,24 +1486,28 @@ class LeerrohrVerlegenTool(QDialog):
             )
             cur = conn.cursor()
 
-            # Lade NUR die Farbschemata für die gewählte Firma & Typ
+            # Lade NUR die Farbschemata (CODIERUNG) und ihre IDs für die gewählte Firma & Typ
             cur.execute("""
-                SELECT DISTINCT "FARBSCHEMA"
+                SELECT "CODIERUNG", "ID_CODIERUNG"
                 FROM lwl."LUT_Leerrohr_SubTyp"
                 WHERE "FIRMA" = %s AND "ID_TYP" = %s
-                ORDER BY "FARBSCHEMA";
+                GROUP BY "CODIERUNG", "ID_CODIERUNG"
+                ORDER BY "CODIERUNG";
             """, (firma, typ_id))
 
             rows = cur.fetchall()
 
             if rows:
                 self.ui.comboBox_Farbschema.setEnabled(True)
-                self.ui.comboBox_Farbschema.addItems([row[0] for row in rows])
+                for codierung, codierung_id in rows:
+                    self.ui.comboBox_Farbschema.addItem(codierung, codierung_id)  # Text als sichtbar, ID als data
 
-                # Falls das bisherige Farbschema noch verfügbar ist → beibehalten
-                previous_farbschema = self.ui.comboBox_Farbschema.currentText()
-                if previous_farbschema in [row[0] for row in rows]:
-                    self.ui.comboBox_Farbschema.setCurrentText(previous_farbschema)
+                # Falls das bisherige Farbschema noch verfügbar ist → beibehalten (Text oder ID prüfen)
+                previous_farbschema = self.ui.comboBox_Farbschema.currentData()
+                if previous_farbschema in [row[1] for row in rows]:  # Suche nach ID
+                    self.ui.comboBox_Farbschema.setCurrentIndex(
+                        [row[1] for row in rows].index(previous_farbschema)
+                    )
                 else:
                     self.ui.comboBox_Farbschema.setCurrentIndex(0)  # Erstes gültiges setzen
 
@@ -1502,16 +1528,19 @@ class LeerrohrVerlegenTool(QDialog):
         self.populate_leerrohr_subtypen()  # Direkt Subtypen neu laden
 
     def populate_firma(self):
-        """Füllt die ComboBox für Firma basierend auf dem gewählten Leerrohrtyp."""
+        """Lädt alle Firmen aus LUT_Leerrohr_SubTyp für den ausgewählten Typ, mit Prüfung in LUT_Rohr_Beschreibung."""
+        print("DEBUG: Starte populate_firma")
         self.ui.comboBox_Firma.blockSignals(True)
         self.ui.comboBox_Firma.clear()
-        self.ui.comboBox_Firma.setEnabled(False)
+        self.ui.comboBox_Firma.setEnabled(True)  # Immer aktiviert
 
-        typ_id = self.ui.comboBox_leerrohr_typ.currentData()
+        typ_id = self.ui.comboBox_leerrohr_typ.currentData()  # ID_TYP
 
         if not typ_id:
             self.ui.comboBox_Firma.addItem("Bitte Typ wählen")
             self.ui.comboBox_Firma.blockSignals(False)
+            self.ui.label_gewaehltes_leerrohr_2.clear()
+            self.ui.label_gewaehltes_leerrohr_2.setStyleSheet("")
             return
 
         db_details = self.get_database_connection()
@@ -1528,30 +1557,42 @@ class LeerrohrVerlegenTool(QDialog):
             )
             cur = conn.cursor()
 
-            # Lade alle Firmen für den gewählten Typ
+            print("DEBUG: Lade alle Firmen aus LUT_Leerrohr_SubTyp für Typ, mit Prüfung in LUT_Rohr_Beschreibung")
             cur.execute("""
-                SELECT DISTINCT "FIRMA"
-                FROM lwl."LUT_Leerrohr_SubTyp"
-                WHERE "ID_TYP" = %s
-                ORDER BY "FIRMA";
+                SELECT DISTINCT ls."FIRMA"
+                FROM lwl."LUT_Leerrohr_SubTyp" ls
+                JOIN lwl."LUT_Rohr_Beschreibung" rb ON ls."id" = rb."ID_SUBTYP"
+                WHERE ls."ID_TYP" = %s
+                ORDER BY ls."FIRMA";
             """, (typ_id,))
+            firmen = cur.fetchall()
+            print(f"DEBUG: Gefundene Firmen: {firmen}")
 
-            rows = cur.fetchall()
-
-            if rows:
-                self.ui.comboBox_Firma.setEnabled(True)
-                self.ui.comboBox_Firma.addItems([row[0] for row in rows])
-
-                # Falls nur eine Firma verfügbar ist → direkt setzen
-                if len(rows) == 1:
-                    self.ui.comboBox_Firma.setCurrentIndex(0)
-
-            else:
+            if not firmen:
                 self.ui.comboBox_Firma.addItem("Keine Firma verfügbar")
+                self.ui.comboBox_Firma.blockSignals(False)
+                self.ui.label_gewaehltes_leerrohr_2.clear()
+                self.ui.label_gewaehltes_leerrohr_2.setStyleSheet("")
+                return
+
+            # Fülle das Dropdown mit Firmennamen und setze den Firmennamen als data
+            for firma_name, in firmen:
+                print(f"DEBUG: Hinzufügen zu Dropdown – Firma: {firma_name}")
+                self.ui.comboBox_Firma.addItem(firma_name, firma_name)  # Setze den Firmennamen als data
+
+            # Behalte die vorherige Firma, falls verfügbar
+            previous_firma = self.ui.comboBox_Firma.currentData()
+            if previous_firma in [f[0] for f in firmen]:
+                self.ui.comboBox_Firma.setCurrentIndex(
+                    [f[0] for f in firmen].index(previous_firma)
+                )
+            else:
+                self.ui.comboBox_Firma.setCurrentIndex(0)  # Erstes gültiges setzen
 
         except Exception as e:
             self.ui.label_Status.setText(f"Fehler beim Laden der Firmen: {e}")
             self.ui.label_Status.setStyleSheet("background-color: lightcoral;")
+            print(f"DEBUG: Fehler bei der Abfrage der Firmen: {e}")
 
         finally:
             if cur:
@@ -1560,21 +1601,19 @@ class LeerrohrVerlegenTool(QDialog):
                 conn.close()
 
         self.ui.comboBox_Firma.blockSignals(False)
-        self.populate_farbschema()  # Direkt Farbschema neu laden
+        self.populate_farbschema()  # Direkt Codierungen neu laden
 
     def update_selected_leerrohr_subtyp(self):
-        """Aktualisiert das Label für den gewählten Subtyp, ohne das Farbschema zu überschreiben."""
-        subtyp_text = self.ui.comboBox_leerrohr_typ_2.currentText()
-
-        if subtyp_text and self.ui.comboBox_leerrohr_typ_2.currentIndex() >= 0:
+        """Aktualisiert das Label für den gewählten Subtyp, basierend auf Codierung und Subtypen aus LUT_Leerrohr_SubTyp."""
+        print("DEBUG: Starte update_selected_leerrohr_subtyp")
+        if self.ui.comboBox_leerrohr_typ_2.currentIndex() >= 0:
+            subtyp_text = self.ui.comboBox_leerrohr_typ_2.currentText()
+            selected_subtyp = self.ui.comboBox_leerrohr_typ_2.currentData()
+            print(f"DEBUG: Gewählter Subtyp – Text: {subtyp_text}, Data: {selected_subtyp}")
             self.ui.label_gewaehltes_leerrohr_2.setText(subtyp_text)
-
-            # 🚨 Entferne den automatischen Aufruf von populate_farbschema()
-            # Die Farbschemata dürfen nicht neu geladen werden, wenn nur der Subtyp wechselt.
         else:
             self.ui.label_gewaehltes_leerrohr_2.clear()
-            self.ui.comboBox_Farbschema.clear()
-            self.ui.comboBox_Farbschema.addItem("Bitte Subtyp wählen")
+            print("DEBUG: Kein Subtyp ausgewählt, Label geleert")
 
     def activate_trasse_selection(self):
         # Setze das Label zurück
@@ -1594,25 +1633,32 @@ class LeerrohrVerlegenTool(QDialog):
         self.iface.mapCanvas().setMapTool(self.map_tool)
             
     def update_verbundnummer_dropdown(self):
-        """Aktualisiert das Verbundnummer-Dropdown basierend auf dem Leerrohrtyp."""
+        """Aktualisiert das Verbundnummer-Dropdown basierend auf dem Leerrohrtyp, unabhängig von Codierung."""
+        print("DEBUG: Starte update_verbundnummer_dropdown")
         typ_id = self.ui.comboBox_leerrohr_typ.currentData()  # Holt den aktuellen Typ
+        print(f"DEBUG: Ausgewählter Leerrohrtyp (currentData): {typ_id}")
 
         if typ_id == 3:  # Multi-Rohr → Verbundnummer wählbar
             self.ui.comboBox_Verbundnummer.setEnabled(True)
-            self.populate_verbundnummer()  # Verfügbare Nummern abrufen
+            self.populate_verbundnummer()  # Verfügbare Nummern abrufen, berücksichtigt Codierung indirekt
+            print("DEBUG: Verbundnummer-Dropdown aktiviert für Multi-Rohr (Typ 3)")
         else:
             # Alle anderen Typen → Deaktiviert anzeigen
             self.ui.comboBox_Verbundnummer.clear()
             self.ui.comboBox_Verbundnummer.addItem("Deaktiviert")  
             self.ui.comboBox_Verbundnummer.setCurrentIndex(0)
             self.ui.comboBox_Verbundnummer.setEnabled(False)
+            print(f"DEBUG: Verbundnummer-Dropdown deaktiviert für Typ {typ_id}")
 
     def pruefe_daten(self):
-        """Prüft, ob die Pflichtfelder korrekt gefüllt sind und die Daten logisch zusammenpassen."""
+        """Prüft, ob die Pflichtfelder korrekt gefüllt sind und die Daten logisch zusammenpassen, unabhängig von Codierung."""
+        print("DEBUG: Starte pruefe_daten")
         fehler = []
 
         typ_id = self.ui.comboBox_leerrohr_typ.currentData()  # Holt den aktuellen Leerrohr-Typ
         verbundnummer = self.ui.comboBox_Verbundnummer.currentText().strip()
+        codierung = self.ui.comboBox_Farbschema.currentText().strip()
+        subtyp_id = self.ui.comboBox_leerrohr_typ_2.currentData()
 
         # DEBUG: Logge grundlegende Informationen zur Nachverfolgung
         print(f"DEBUG: Prüfe Daten – selected_verteiler: {self.selected_verteiler}, selected_verteiler_2: {self.selected_verteiler_2}")
@@ -1637,11 +1683,22 @@ class LeerrohrVerlegenTool(QDialog):
         else:
             if not (self.selected_verteiler and self.selected_verteiler_2):
                 fehler.append("Bitte wähle Start- und Endknoten aus.")
-            
-            if typ_id == 3 and (not verbundnummer or not verbundnummer.isdigit()):
-                fehler.append("Keine gültige Verbundnummer für Multi-Rohr gewählt.")
-            elif typ_id != 3 and verbundnummer != "Deaktiviert":
-                fehler.append("Verbundnummer muss für Nicht-Multi-Rohre 0 sein.")
+        
+        # Prüfe Pflichtfelder für Codierung und Subtyp
+        if not codierung or codierung == "Keine Codierungen verfügbar" or codierung == "Bitte Firma wählen":
+            fehler.append("Bitte wähle eine gültige Codierung aus.")
+        
+        if not subtyp_id or subtyp_id is None or self.ui.comboBox_leerrohr_typ_2.currentText() in ["Keine Subtypen verfügbar", "Bitte Firma und Codierung wählen"]:
+            fehler.append("Bitte wähle einen gültigen Subtyp aus.")
+
+        if typ_id == 3 and (not verbundnummer or not verbundnummer.isdigit()):
+            fehler.append("Keine gültige Verbundnummer für Multi-Rohr gewählt.")
+        elif typ_id != 3 and verbundnummer != "Deaktiviert":
+            fehler.append("Verbundnummer muss für Nicht-Multi-Rohre 0 sein.")
+
+        # Anpassung für Hauptrohre: Verhindere Datenbankfehler bei "Hauptrohr"
+        if typ_id != 3:  # Für Hauptrohre/Zubringerrohre (nicht Multi-Rohr)
+            verbundnummer = "0"  # Setze Verbundnummer auf 0, um Datenbankfehler zu vermeiden
 
         # NEU: Prüfung der Trassen und des Endknotens (für beide Modi)
         if hasattr(self, 'selected_trasse_ids_flat') and self.selected_trasse_ids_flat:
@@ -1680,17 +1737,6 @@ class LeerrohrVerlegenTool(QDialog):
                 elif knoten_counts[end_knoten] > 1 and end_knoten != start_knoten:
                     fehler.append(f"Endknoten {end_knoten} kommt mehrfach vor und ist kein gültiger Endknoten.")
                 
-                # 4. Entferne alte Endknoten-Prüfung (wird jetzt durch die neue Logik ersetzt)
-                # Alte Prüfung entfernt:
-                # cur.execute("""
-                #     SELECT COUNT(*) 
-                #     FROM lwl."LWL_Trasse" 
-                #     WHERE id = ANY(%s) 
-                #     AND ("VONKNOTEN" = %s OR "NACHKNOTEN" = %s)
-                # """, (trassen_ids_list, self.selected_verteiler_2, self.selected_verteiler_2))
-                # if cur.fetchone()[0] == 0:
-                #     fehler.append("Kein gültiger Endknoten gefunden. Prüfen Sie die Verbindungen der Trassen.")
-
             except Exception as e:
                 fehler.append(f"Datenbankfehler bei der Trassenprüfung: {e}")
             finally:
@@ -1718,6 +1764,8 @@ class LeerrohrVerlegenTool(QDialog):
                         AND "VKG_LR" = %s
                         AND "ID_TRASSE" && %s::bigint[];
                     """, (self.selected_parent_leerrohr["VKG_LR"], "{" + ",".join(map(str, set(self.selected_trasse_ids_flat))) + "}"))
+                elif typ_id != 3:  # Überspringe die Abfrage für Hauptrohre/Zubringerrohre
+                    pass  # Keine Prüfung der vorhandenen Verbundnummern für Nicht-Multi-Rohre
                 else:
                     cur.execute("""
                         SELECT DISTINCT "VERBUNDNUMMER"
@@ -1735,11 +1783,14 @@ class LeerrohrVerlegenTool(QDialog):
                         AND "VKG_LR" = %s
                         AND "ID_TRASSE" && %s::bigint[];
                     """, (self.selected_verteiler, "{" + ",".join(map(str, set(self.selected_trasse_ids_flat))) + "}"))
+                elif typ_id != 3:  # Überspringe die Abfrage für Hauptrohre/Zubringerrohre
+                    pass  # Keine Prüfung der vorhandenen Verbundnummern für Nicht-Multi-Rohre
 
-            vorhandene_verbundnummern = {int(row[0]) for row in cur.fetchall() if row[0] is not None}
+            if typ_id == 3:  # Nur für Multi-Rohre die Prüfung durchführen
+                vorhandene_verbundnummern = {int(row[0]) for row in cur.fetchall() if row[0] is not None}
 
-            if verbundnummer and verbundnummer.isdigit() and int(verbundnummer) in vorhandene_verbundnummern:
-                fehler.append(f"Verbundnummer {verbundnummer} ist bereits vergeben.")
+                if verbundnummer and verbundnummer.isdigit() and int(verbundnummer) in vorhandene_verbundnummern:
+                    fehler.append(f"Verbundnummer {verbundnummer} ist bereits vergeben.")
 
         except Exception as e:
             fehler.append(f"Datenbankfehler bei der Verbundnummer-Prüfung: {e}")
@@ -1765,45 +1816,8 @@ class LeerrohrVerlegenTool(QDialog):
 
         print(f"DEBUG: Prüfe Daten – selected_trasse_ids_flat: {self.selected_trasse_ids_flat}")
 
-    def ordne_trassen(self, trassen_info):
-        """Ordnet die Trassen basierend auf den Knoteninformationen und dem gewählten Verteilerkasten."""
-        if not trassen_info or not self.ui.label_gewaehlter_verteiler.toPlainText().strip():
-            return trassen_info
-
-        verteiler_id = int(self.ui.label_gewaehlter_verteiler.toPlainText().split(":")[1].strip())
-
-        # Finde die Trasse, die vom Verteilerkasten startet
-        start_trasse = None
-        for i, (trasse_id, vonknoten, nachknoten) in enumerate(trassen_info):
-            if vonknoten == verteiler_id or nachknoten == verteiler_id:
-                start_trasse = trassen_info.pop(i)
-                # Falls nötig, Richtung anpassen
-                if start_trasse[1] != verteiler_id:
-                    start_trasse = (start_trasse[0], start_trasse[2], start_trasse[1])
-                break
-
-        if not start_trasse:
-            # Falls keine passende Trasse gefunden wurde, bleibt die Reihenfolge unverändert
-            return trassen_info
-
-        # Reihenfolge anpassen
-        geordnete_trassen = [start_trasse]
-        while trassen_info:
-            letzte_trasse = geordnete_trassen[-1]
-            letzte_knoten = letzte_trasse[2]  # NACH-Knoten
-
-            for i, trasse in enumerate(trassen_info):
-                if trasse[1] == letzte_knoten:
-                    geordnete_trassen.append(trassen_info.pop(i))
-                    break
-                elif trasse[2] == letzte_knoten:
-                    geordnete_trassen.append((trasse[0], trasse[2], trasse[1]))
-                    trassen_info.pop(i)
-                    break
-        return geordnete_trassen
-
     def importiere_daten(self):
-        """Importiert die Daten aus dem Formular in die Tabelle lwl.LWL_Leerrohr oder lwl.LWL_Leerrohr_Abzweigung."""
+        """Importiert die Daten aus dem Formular in die Tabelle lwl.LWL_Leerrohr oder lwl.LWL_Leerrohr_Abzweigung, berücksichtigt Codierung statt Farbschema."""
         print("DEBUG: Starte importiere_daten")
         conn = None
         try:
@@ -1852,7 +1866,7 @@ class LeerrohrVerlegenTool(QDialog):
                 parent_leerrohr_id = self.selected_subduct_parent if subduct else None
                 verfuegbare_rohre = "{1,2,3}"
                 typ = self.ui.comboBox_leerrohr_typ.currentData()
-                farbschema = self.ui.comboBox_Farbschema.currentText().strip()
+                codierung = self.ui.comboBox_Farbschema.currentText().strip()  # Geändert von farbschema zu codierung
                 subtyp_id = self.ui.comboBox_leerrohr_typ_2.currentData()
                 # NEU: VONKNOTEN und NACHKNOTEN direkt vorgeben
                 vonknoten = self.selected_verteiler
@@ -1861,12 +1875,12 @@ class LeerrohrVerlegenTool(QDialog):
                 beschreibung = self.ui.label_Kommentar_2.text().strip() or None
                 verlegt_am = self.ui.mDateTimeEdit_Strecke.date().toString("yyyy-MM-dd")
 
-                print(f"DEBUG: Hauptstrang-Daten - Trassen: {trassen_ids_pg_array}, Verbundnummer: {verbundnummer}, Typ: {typ}, Farbschema: {farbschema}, Subtyp: {subtyp_id}, Von: {vonknoten}, Nach: {nachknoten}, Subduct: {subduct}, Kommentar: {kommentar}, Beschreibung: {beschreibung}, Verlegt_am: {verlegt_am}")
+                print(f"DEBUG: Hauptstrang-Daten - Trassen: {trassen_ids_pg_array}, Verbundnummer: {verbundnummer}, Typ: {typ}, Codierung: {codierung}, Subtyp: {subtyp_id}, Von: {vonknoten}, Nach: {nachknoten}, Subduct: {subduct}, Kommentar: {kommentar}, Beschreibung: {beschreibung}, Verlegt_am: {verlegt_am}")
 
                 if verbundnummer == "Deaktiviert" or not verbundnummer:
                     verbundnummer = "0" if typ != 3 else None
 
-                # GEÄNDERT: VONKNOTEN und NACHKNOTEN explizit in der INSERT-Abfrage vorgeben
+                # GEÄNDERT: VONKNOTEN und NACHKNOTEN explizit in der INSERT-Abfrage vorgeben, Codierung statt Farbschema
                 insert_query = """
                 INSERT INTO lwl."LWL_Leerrohr" (
                     "ID_TRASSE", "VERBUNDNUMMER", "VERFUEGBARE_ROHRE", "STATUS", "VKG_LR", 
@@ -1874,9 +1888,11 @@ class LeerrohrVerlegenTool(QDialog):
                     "VONKNOTEN", "NACHKNOTEN", "KOMMENTAR", "BESCHREIBUNG", "VERLEGT_AM"
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """
+                # Korrigiere die Spalte "FARBSCHEMA" zu "CODIERUNG" in der INSERT-Abfrage
+                insert_query = insert_query.replace('"FARBSCHEMA"', '"CODIERUNG"')
                 values = (
                     trassen_ids_pg_array, verbundnummer, verfuegbare_rohre, status, vonknoten,
-                    gefoerdert, subduct, parent_leerrohr_id, typ, farbschema, subtyp_id,
+                    gefoerdert, subduct, parent_leerrohr_id, typ, codierung, subtyp_id,
                     vonknoten, nachknoten, kommentar, beschreibung, verlegt_am
                 )
                 cur.execute(insert_query, values)
@@ -1907,8 +1923,9 @@ class LeerrohrVerlegenTool(QDialog):
         if layer:
             layer.triggerRepaint()
             print("DEBUG: Layer aktualisiert")
+
     def initialisiere_formular(self):
-        """Setzt das Formular zurück, entfernt vorhandene Highlights, es sei denn, Mehrfachimport ist aktiviert."""
+        """Setzt das Formular zurück, entfernt vorhandene Highlights, es sei denn, Mehrfachimport ist aktiviert, unabhängig von Codierung."""
         print("DEBUG: Starte initialisiere_formular")
 
         # Prüfe, ob Mehrfachimport aktiviert ist
@@ -1970,6 +1987,8 @@ class LeerrohrVerlegenTool(QDialog):
             self.ui.pushButton_Import.setEnabled(True)  # Import bleibt aktiviert für weitere Imports
 
     def clear_trasse_selection(self):
+        """Setzt die Trassenauswahl zurück, entfernt Highlights und initialisiert UI-Elemente, unabhängig von Codierung."""
+        print("DEBUG: Starte clear_trasse_selection")
         # Setze Default-Werte für Label und Felder
         self.ui.label_gewaehlter_verteiler.setText("Verteiler wählen!")
         self.ui.label_gewaehlter_verteiler.setStyleSheet("background-color: lightcoral;")
@@ -1982,7 +2001,7 @@ class LeerrohrVerlegenTool(QDialog):
         
         self.selected_verteiler = None  # Sicherstellen, dass der Wert zurückgesetzt wird
         self.selected_verteiler_2 = None  # Sicherstellen, dass der Wert zurückgesetzt wird
-                        
+                            
         # Entferne das Highlight für den Verteilerkasten
         if hasattr(self, "verteiler_highlight_1") and self.verteiler_highlight_1:
             self.verteiler_highlight_1.hide()
@@ -2002,6 +2021,10 @@ class LeerrohrVerlegenTool(QDialog):
         self.ui.comboBox_Verbundnummer.setCurrentIndex(-1)
         self.ui.pushButton_Import.setEnabled(False)
         
+        # Leere und initialisiere Subduct-Label
+        self.ui.label_Subduct.setText("")  # Leert das Label
+        self.ui.label_Subduct.setStyleSheet("background-color: ;")  # Setzt Standard-Styling
+        
         # 3️⃣ Routing-Highlights entfernen
         self.clear_routing()
 
@@ -2016,7 +2039,7 @@ class LeerrohrVerlegenTool(QDialog):
         print("DEBUG: Formular wurde erfolgreich zurückgesetzt.")
 
     def close_tool(self):
-        """Schließt das Tool und löscht alle Highlights."""
+        """Schließt das Tool und löscht alle Highlights, unabhängig von Codierung."""
         print("DEBUG: Schließe Tool und entferne alle Highlights")
         self.clear_trasse_selection()
         if self.map_tool:
@@ -2054,6 +2077,8 @@ class LeerrohrVerlegenTool(QDialog):
         self.close()
 
     def closeEvent(self, event):
-        """Überschreibt das Schließen des Fensters über das rote 'X'."""
+        """Überschreibt das Schließen des Fensters über das rote 'X', unabhängig von Codierung."""
+        print("DEBUG: Starte closeEvent")
         self.close_tool()
         event.accept()
+        print("DEBUG: Fenster-Schließereignis akzeptiert")

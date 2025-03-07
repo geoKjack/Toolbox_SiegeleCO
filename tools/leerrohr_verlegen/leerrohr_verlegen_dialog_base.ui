@@ -55,7 +55,7 @@
       <property name="geometry">
        <rect>
         <x>406</x>
-        <y>21</y>
+        <y>20</y>
         <width>84</width>
         <height>25</height>
        </rect>
@@ -80,19 +80,19 @@
        <string/>
       </property>
      </widget>
-    </widget>
-    <widget class="QPushButton" name="pushButton_Import">
-     <property name="geometry">
-      <rect>
-       <x>333</x>
-       <y>734</y>
-       <width>84</width>
-       <height>23</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>Import</string>
-     </property>
+     <widget class="QPushButton" name="pushButton_Import">
+      <property name="geometry">
+       <rect>
+        <x>406</x>
+        <y>47</y>
+        <width>84</width>
+        <height>23</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Import</string>
+      </property>
+     </widget>
     </widget>
     <widget class="QDialogButtonBox" name="button_box">
      <property name="geometry">
@@ -153,7 +153,7 @@
        <rect>
         <x>130</x>
         <y>25</y>
-        <width>61</width>
+        <width>81</width>
         <height>22</height>
        </rect>
       </property>
@@ -261,14 +261,14 @@
       </property>
       <property name="geometry">
        <rect>
-        <x>190</x>
+        <x>209</x>
         <y>174</y>
-        <width>131</width>
+        <width>111</width>
         <height>25</height>
        </rect>
       </property>
       <property name="text">
-       <string>Erfassen Hauptrohr</string>
+       <string>Erfasse Hauptrohr</string>
       </property>
      </widget>
      <widget class="QComboBox" name="comboBox_Foerderung">
@@ -334,9 +334,9 @@
      <property name="geometry">
       <rect>
        <x>10</x>
-       <y>0</y>
+       <y>10</y>
        <width>491</width>
-       <height>211</height>
+       <height>161</height>
       </rect>
      </property>
      <property name="title">
@@ -382,16 +382,6 @@
       </property>
       <property name="text">
        <string>Parent Leerrohr</string>
-      </property>
-     </widget>
-     <widget class="QGraphicsView" name="graphicsView_Auswahl_Rohre">
-      <property name="geometry">
-       <rect>
-        <x>1</x>
-        <y>159</y>
-        <width>490</width>
-        <height>51</height>
-       </rect>
       </property>
      </widget>
      <widget class="QLabel" name="label_gewaehlter_verteiler">
@@ -522,9 +512,9 @@
      <property name="geometry">
       <rect>
        <x>10</x>
-       <y>220</y>
+       <y>177</y>
        <width>491</width>
-       <height>181</height>
+       <height>231</height>
       </rect>
      </property>
      <property name="title">
@@ -680,6 +670,16 @@
        <string>Gewählter Sub-Typ</string>
       </property>
      </widget>
+     <widget class="QGraphicsView" name="graphicsView_Auswahl_Rohre">
+      <property name="geometry">
+       <rect>
+        <x>1</x>
+        <y>180</y>
+        <width>490</width>
+        <height>51</height>
+       </rect>
+      </property>
+     </widget>
     </widget>
     <widget class="QCheckBox" name="checkBox_clearForm">
      <property name="geometry">
@@ -694,13 +694,6 @@
       <string>Mehrfachimport</string>
      </property>
     </widget>
-    <zorder>groupBox_3</zorder>
-    <zorder>button_box</zorder>
-    <zorder>groupBox_2</zorder>
-    <zorder>groupBox</zorder>
-    <zorder>groupBox_4</zorder>
-    <zorder>pushButton_Import</zorder>
-    <zorder>checkBox_clearForm</zorder>
    </widget>
    <widget class="QWidget" name="tab_2">
     <attribute name="title">
