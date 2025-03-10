@@ -474,9 +474,11 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.gewaehlte_farb_id = farb_id  # Speichere die ID der FARBE
 
     def lade_farben_und_rohrnummern(self, subtyp_id, farbschema, firma):
-        """Lädt Farben und Rohrnummern aus der Tabelle LUT_Rohr_Beschreibung basierend auf Subtyp, Farbschema und Hersteller."""
+        """Lädt Farben und Rohrnummern aus der Tabelle LUT_Rohr_Beschreibung basierend auf Subtyp, CODIERUNG und Hersteller."""
         try:
             cur = self.conn.cursor()
+            # Debug-Ausgabe hinzufügen
+            print(f"Debug: subtyp_id={subtyp_id}, farbschema={farbschema}, firma={firma}")
             query = """
                 SELECT "ROHRNUMMER", "FARBCODE", "id"
                 FROM "lwl"."LUT_Rohr_Beschreibung"
@@ -486,12 +488,11 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
             cur.execute(query, (subtyp_id, farbschema, firma))
             result = cur.fetchall()
             if not result:
-                self.iface.messageBar().pushMessage("Info", "Keine Rohre gefunden.", level=Qgis.Warning)
+                self.iface.messageBar().pushMessage("Info", "Keine Rohre gefunden. Überprüfe SUBTYP-ID, CODIERUNG und FIRMA.", level=Qgis.Warning)
             return result
         except Exception as e:
             self.iface.messageBar().pushMessage("Fehler", f"Farben konnten nicht geladen werden: {e}", level=Qgis.Critical)
             return []
-
     def aktion_verlauf(self):
         """Erfasst die Liniengeometrie der Hauseinführung mit Snap auf Leerrohr oder Verteilerkasten."""
         self.iface.messageBar().pushMessage(
