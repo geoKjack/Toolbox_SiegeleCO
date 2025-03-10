@@ -1839,7 +1839,7 @@ class LeerrohrVerlegenTool(QDialog):
                 nach_knoten = self.selected_verteiler_2
                 print(f"DEBUG: Abzweigung-Daten - Trassen: {trassen_ids_pg_array}, Parent: {parent_id}, Hilfsknoten: {hilfsknoten_id}, Nachknoten: {nach_knoten}")
 
-                cur.execute("""
+                cur.execute(""" 
                     SELECT COUNT(*) FROM lwl."LWL_Leerrohr_Abzweigung" 
                     WHERE "ID_PARENT_LEERROHR" = %s AND "ID_HILFSKNOTEN" = %s AND "NACHKNOTEN" = %s
                 """, (parent_id, hilfsknoten_id, nach_knoten))
@@ -1853,7 +1853,7 @@ class LeerrohrVerlegenTool(QDialog):
                     "VERFUEGBARE_ROHRE", "STATUS"
                 ) VALUES (%s, %s, %s::bigint[], %s, %s, %s)
                 """
-                values = (parent_id, hilfsknoten_id, hilfsknoten_id, nach_knoten, trassen_ids_pg_array, count, verfuegbare_rohre, status)
+                values = (parent_id, hilfsknoten_id, trassen_ids_pg_array, count, verfuegbare_rohre, status)
                 cur.execute(insert_query, values)
                 print(f"DEBUG: Abzweigung eingefügt, Rows affected: {cur.rowcount}")
             else:
@@ -1866,34 +1866,32 @@ class LeerrohrVerlegenTool(QDialog):
                 parent_leerrohr_id = self.selected_subduct_parent if subduct else None
                 verfuegbare_rohre = "{1,2,3}"
                 typ = self.ui.comboBox_leerrohr_typ.currentData()
-                codierung = self.ui.comboBox_Farbschema.currentText().strip()  # Geändert von farbschema zu codierung
+                codierung = self.ui.comboBox_Farbschema.currentText().strip()
                 subtyp_id = self.ui.comboBox_leerrohr_typ_2.currentData()
-                # NEU: VONKNOTEN und NACHKNOTEN direkt vorgeben
+                firma_hersteller = self.ui.comboBox_Firma.currentData()  # NEU: Firma aus Dropdown
                 vonknoten = self.selected_verteiler
                 nachknoten = self.selected_verteiler_2
                 kommentar = self.ui.label_Kommentar.text().strip() or None
                 beschreibung = self.ui.label_Kommentar_2.text().strip() or None
                 verlegt_am = self.ui.mDateTimeEdit_Strecke.date().toString("yyyy-MM-dd")
 
-                print(f"DEBUG: Hauptstrang-Daten - Trassen: {trassen_ids_pg_array}, Verbundnummer: {verbundnummer}, Typ: {typ}, Codierung: {codierung}, Subtyp: {subtyp_id}, Von: {vonknoten}, Nach: {nachknoten}, Subduct: {subduct}, Kommentar: {kommentar}, Beschreibung: {beschreibung}, Verlegt_am: {verlegt_am}")
+                print(f"DEBUG: Hauptstrang-Daten - Trassen: {trassen_ids_pg_array}, Verbundnummer: {verbundnummer}, Typ: {typ}, Codierung: {codierung}, Subtyp: {subtyp_id}, Firma: {firma_hersteller}, Von: {vonknoten}, Nach: {nachknoten}, Subduct: {subduct}, Kommentar: {kommentar}, Beschreibung: {beschreibung}, Verlegt_am: {verlegt_am}")
 
                 if verbundnummer == "Deaktiviert" or not verbundnummer:
                     verbundnummer = "0" if typ != 3 else None
 
-                # GEÄNDERT: VONKNOTEN und NACHKNOTEN explizit in der INSERT-Abfrage vorgeben, Codierung statt Farbschema
+                # GEÄNDERT: Direkter Insert-Befehl mit "CODIERUNG" statt "FARBSCHEMA" und "FIRMA_HERSTELLER" hinzugefügt
                 insert_query = """
                 INSERT INTO lwl."LWL_Leerrohr" (
                     "ID_TRASSE", "VERBUNDNUMMER", "VERFUEGBARE_ROHRE", "STATUS", "VKG_LR", 
-                    "GEFOERDERT", "SUBDUCT", "PARENT_LEERROHR_ID", "TYP", "FARBSCHEMA", "SUBTYP", 
-                    "VONKNOTEN", "NACHKNOTEN", "KOMMENTAR", "BESCHREIBUNG", "VERLEGT_AM"
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    "GEFOERDERT", "SUBDUCT", "PARENT_LEERROHR_ID", "TYP", "CODIERUNG", "SUBTYP", 
+                    "FIRMA_HERSTELLER", "VONKNOTEN", "NACHKNOTEN", "KOMMENTAR", "BESCHREIBUNG", "VERLEGT_AM"
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """
-                # Korrigiere die Spalte "FARBSCHEMA" zu "CODIERUNG" in der INSERT-Abfrage
-                insert_query = insert_query.replace('"FARBSCHEMA"', '"CODIERUNG"')
                 values = (
                     trassen_ids_pg_array, verbundnummer, verfuegbare_rohre, status, vonknoten,
                     gefoerdert, subduct, parent_leerrohr_id, typ, codierung, subtyp_id,
-                    vonknoten, nachknoten, kommentar, beschreibung, verlegt_am
+                    firma_hersteller, vonknoten, nachknoten, kommentar, beschreibung, verlegt_am
                 )
                 cur.execute(insert_query, values)
                 print(f"DEBUG: Hauptstrang eingefügt, Rows affected: {cur.rowcount}")
