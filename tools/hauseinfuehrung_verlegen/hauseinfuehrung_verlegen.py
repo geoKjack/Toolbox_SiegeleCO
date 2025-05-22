@@ -121,6 +121,9 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.ui.checkBox_direkt.stateChanged.connect(self.handle_checkbox_direkt)
         self.ui.pushButton_verteiler.clicked.connect(self.verteilerkasten_waehlen)
 
+        # Direktmodus initialisieren anhand des tatsächlichen Zustands der Checkbox
+        self.handle_checkbox_direkt(self.ui.checkBox_direkt.checkState())
+
     def init_database_connection(self):
         """Initialisiert die Datenbankverbindung."""
         try:
@@ -715,68 +718,110 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
 
     def daten_importieren(self):
         """Importiert die Geometrie und Attribute in die Datenbank."""
+        # ❗ Sicherheit: Direktmodus immer aktuell aus der UI holen
+        self.direktmodus = self.ui.checkBox_direkt.isChecked()
+        QgsMessageLog.logMessage(f"[Import] Direktmodus laut Checkbox = {self.direktmodus}", "Hauseinfuehrung", Qgis.Info)
+
         if not hasattr(self, 'erfasste_geom') or self.erfasste_geom is None:
             self.iface.messageBar().pushMessage(
                 "Fehler", "Keine Geometrie erfasst. Bitte zuerst die Linie digitalisieren.", level=Qgis.Critical
             )
-            return  # Import abbrechen
+            return
 
         try:
             cur = self.conn.cursor()
 
-            # Hol die Attribute aus den UI-Feldern
             kommentar = self.ui.label_Kommentar.text()
             beschreibung = self.ui.label_Kommentar_2.text()
-            geom_wkt = self.erfasste_geom.asWkt()
-            rohrnummer = self.gewaehlte_rohrnummer
-            vkg_lr = self.gewaehlter_verteiler
+            gefoerdert_text = self.ui.comboBox_Gefoerdert.currentText()
+            gefoerdert = (gefoerdert_text == "JA")
             farbe = None
-            gefoerdert_text = self.ui.comboBox_Gefoerdert.currentText()  # Wert der ComboBox abgreifen
-            gefoerdert = True if gefoerdert_text == "JA" else False
+            vkg_lr = self.gewaehlter_verteiler
+            adresspunkt_id = -1 if self.ui.checkBox_aufschlieung.isChecked() else self.gewaehlte_adresse
 
-            # Adress-ID setzen (Platzhalter für Aufschließungspunkt oder tatsächlicher ADRKEY)
-            if self.ui.checkBox_aufschlieung.isChecked():
-                adresspunkt_id = -1  # Platzhalter für Aufschließungspunkt
-            else:
-                adresspunkt_id = self.gewaehlte_adresse  # Normaler ADRKEY
+            # Direktanschluss
+            # Sicherheitsabfrage: Direktmodus aus UI aktualisieren
+            self.direktmodus = self.ui.checkBox_direkt.isChecked()
 
-            # Prüfen, ob der Direktmodus aktiv ist
             if self.direktmodus:
-                # Setze die Werte für direkte Hauseinführungen
-                rohrnummer = 0  # Direktmodus: Rohrnummer ist immer 0
-                farbe = 'direkt'  # Direktmodus: Farbe ist immer 'direkt'
+                rohrnummer = 0
+                farbe = 'direkt'
 
-                # Geometrie anpassen, falls Direktmodus
-                if not hasattr(self, "gewaehlter_verteiler") or self.gewaehlter_verteiler is None:
-                    self.iface.messageBar().pushMessage(
-                        "Fehler", "Kein Verteilerkasten ausgewählt.", level=Qgis.Critical
-                    )
+                if not self.gewaehlter_verteiler:
+                    msg = "❌ Kein Verteilerkasten ausgewählt."
+                    self.iface.messageBar().pushMessage("Fehler", msg, level=Qgis.Critical)
+                    print(msg)
                     return
 
-                points = self.erfasste_geom.asPolyline()
-                if len(points) > 1:
-                    start_point_geom = QgsProject.instance().mapLayersByName("LWL_Knoten")[0].getFeature(vkg_lr).geometry()
-                    points[0] = start_point_geom.asPoint()  # Setze den Startpunkt auf den Knoten
-                    self.erfasste_geom = QgsGeometry.fromPolylineXY(points)
-                    geom_wkt = self.erfasste_geom.asWkt()
+                # Sicherer Zugriff per Attribut "id", nicht über fid!
+                knoten_layer = QgsProject.instance().mapLayersByName("LWL_Knoten")[0]
+                request = QgsFeatureRequest().setFilterExpression(f'"id" = {self.gewaehlter_verteiler}')
+                features = list(knoten_layer.getFeatures(request))
 
+                if not features or not features[0].geometry() or features[0].geometry().isEmpty():
+                    msg = f"❌ Verteiler-ID {self.gewaehlter_verteiler} gefunden, aber ohne gültige Geometrie."
+                    self.iface.messageBar().pushMessage("Fehler", msg, level=Qgis.Critical)
+                    print(msg)
+                    return
+
+                vkg_feature = features[0]
+
+                # Geometrie anpassen: Startpunkt der Linie = Verteilerpunkt
+                points = self.erfasste_geom.asPolyline()
+                if len(points) < 2:
+                    msg = "❌ Die erfasste Linie muss mindestens zwei Punkte enthalten."
+                    self.iface.messageBar().pushMessage("Fehler", msg, level=Qgis.Critical)
+                    print(msg)
+                    return
+
+                try:
+                    startpunkt = vkg_feature.geometry().asPoint()
+                    points[0] = startpunkt
+                except Exception as e:
+                    msg = f"❌ Fehler beim Auslesen der Verteiler-Geometrie: {e}"
+                    self.iface.messageBar().pushMessage("Fehler", msg, level=Qgis.Critical)
+                    print(msg)
+                    return
+
+                self.erfasste_geom = QgsGeometry.fromPolylineXY(points)
+                geom_wkt = self.erfasste_geom.asWkt()
+
+                # Debug-Ausgaben in GUI und Konsole
+                msg = f"🟢 Direktmodus aktiv – VKG_ID = {self.gewaehlter_verteiler}, Punkte = {len(points)}"
+                self.iface.messageBar().pushMessage("Info", msg, level=Qgis.Info)
+                print(msg)
+                print(f"→ WKT: {geom_wkt}")
+
+                # Adress-ID bestimmen
+                adresspunkt_id = -1 if self.ui.checkBox_aufschlieung.isChecked() else self.gewaehlte_adresse
+
+                # Insert in die DB, mit VKG als ID_KNOTEN
+                cur.execute("""
+                    INSERT INTO "lwl"."LWL_Hauseinfuehrung"
+                    (geom, "ID_LEERROHR", "KOMMENTAR", "BESCHREIBUNG", "ROHRNUMMER", "FARBE",
+                    "VKG_LR", "HA_ADRKEY", "GEFOERDERT", "ID_KNOTEN")
+                    VALUES (ST_SetSRID(ST_GeomFromText(%s), 31254), NULL, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    geom_wkt,
+                    self.ui.label_Kommentar.text(),
+                    self.ui.label_Kommentar_2.text(),
+                    rohrnummer,
+                    farbe,
+                    self.gewaehlter_verteiler,
+                    adresspunkt_id,
+                    self.ui.comboBox_Gefoerdert.currentText() == "JA",
+                    self.gewaehlter_verteiler  # <- hier wird ID_KNOTEN korrekt gesetzt!
+                ))
+            # Standardmodus (über Leerrohr)
             else:
-                # Logik für normale Hauseinführungen (über Leerrohre)
+                rohrnummer = self.gewaehlte_rohrnummer
                 if hasattr(self, "gewaehlte_farb_id") and self.gewaehlte_farb_id is not None:
                     cur.execute(
-                        """
-                        SELECT "FARBE"
-                        FROM "lwl"."LUT_Rohr_Beschreibung"
-                        WHERE "id" = %s
-                        """,
+                        'SELECT "FARBE" FROM "lwl"."LUT_Rohr_Beschreibung" WHERE "id" = %s',
                         (self.gewaehlte_farb_id,)
                     )
                     result = cur.fetchone()
                     farbe = result[0] if result else None
-                    if not farbe:
-                        self.iface.messageBar().pushMessage(
-                            "Warnung", "Keine FARBE für die gewählte Farb-ID gefunden.", level=Qgis.Warning
-                        )
 
                 layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr")[0]
                 selected_features = [f for f in layer.getFeatures() if f["id"] == self.startpunkt_id]
@@ -787,32 +832,47 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
                     return
 
                 leerrohr_geom = selected_features[0].geometry()
-
-                # Snap den Startpunkt erneut auf das Leerrohr
                 points = self.erfasste_geom.asPolyline()
-                if len(points) > 0:
-                    snapped_point = leerrohr_geom.closestSegmentWithContext(points[0])[1]
-                    points[0] = QgsPointXY(snapped_point)
-                    self.erfasste_geom = QgsGeometry.fromPolylineXY(points)
-                    geom_wkt = self.erfasste_geom.asWkt()
+                if len(points) == 0:
+                    self.iface.messageBar().pushMessage(
+                        "Fehler", "Die erfasste Linie enthält keine Punkte.", level=Qgis.Critical
+                    )
+                    return
 
-            # Datenbankabfrage für den Import
-            query = """
-                INSERT INTO "lwl"."LWL_Hauseinfuehrung" (geom, "ID_LEERROHR", "KOMMENTAR", "BESCHREIBUNG", "ROHRNUMMER", "FARBE", "VKG_LR", "HA_ADRKEY", "GEFOERDERT")
-                VALUES (ST_SetSRID(ST_GeomFromText(%s), 31254), %s, %s, %s, %s, %s, %s, %s, %s)
-            """
-            cur.execute(query, (geom_wkt, self.startpunkt_id, kommentar, beschreibung, rohrnummer, farbe, vkg_lr, adresspunkt_id, gefoerdert))
+                snapped_point = leerrohr_geom.closestSegmentWithContext(points[0])[1]
+                points[0] = QgsPointXY(snapped_point)
+                self.erfasste_geom = QgsGeometry.fromPolylineXY(points)
+                geom_wkt = self.erfasste_geom.asWkt()
+
+                QgsMessageLog.logMessage("🔵 Standardmodus (Leerrohr)", "Hauseinfuehrung", Qgis.Info)
+                QgsMessageLog.logMessage(f"Geom: {geom_wkt}", "Hauseinfuehrung", Qgis.Info)
+                QgsMessageLog.logMessage(f"ID_LEERROHR = {self.startpunkt_id}", "Hauseinfuehrung", Qgis.Info)
+
+                query = """
+                    INSERT INTO "lwl"."LWL_Hauseinfuehrung"
+                    (geom, "ID_LEERROHR", "KOMMENTAR", "BESCHREIBUNG", "ROHRNUMMER", "FARBE",
+                    "VKG_LR", "HA_ADRKEY", "GEFOERDERT")
+                    VALUES (ST_SetSRID(ST_GeomFromText(%s), 31254), %s, %s, %s, %s, %s, %s, %s, %s)
+                """
+                cur.execute(query, (
+                    geom_wkt,
+                    self.startpunkt_id,
+                    kommentar,
+                    beschreibung,
+                    rohrnummer,
+                    farbe,
+                    vkg_lr,
+                    adresspunkt_id,
+                    gefoerdert
+                ))
+
             self.conn.commit()
-
-            # Erfolgsmeldung
             self.iface.messageBar().pushMessage("Erfolg", "Daten erfolgreich importiert.", level=Qgis.Success)
 
-            # Karte automatisch refreshen, damit die Daten sofort sichtbar sind
             layer = QgsProject.instance().mapLayersByName("LWL_Hauseinfuehrung")[0]
             if layer:
                 layer.triggerRepaint()
 
-            # Formular zurücksetzen
             self.formular_initialisieren()
 
         except Exception as e:
@@ -820,7 +880,6 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
             self.iface.messageBar().pushMessage(
                 "Fehler", f"Fehler beim Importieren der Daten: {e}", level=Qgis.Critical
             )
-
 
     def formular_initialisieren(self):
         """Setzt das Formular auf den Ausgangszustand zurück und entfernt Highlights."""
