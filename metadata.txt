@@ -1,5 +1,5 @@
 [general]
-name=TollBoxSiegeleCo
+name=ToolBoxSiegeleCo
 qgisMinimumVersion=3.0
 version=1.0
 author=Siegele Connect

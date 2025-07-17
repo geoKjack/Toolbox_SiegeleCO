@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>531</width>
-    <height>809</height>
+    <width>534</width>
+    <height>554</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -19,7 +19,7 @@
      <x>0</x>
      <y>0</y>
      <width>531</width>
-     <height>801</height>
+     <height>551</height>
     </rect>
    </property>
    <property name="font">
@@ -42,10 +42,10 @@
     <widget class="QGroupBox" name="groupBox_3">
      <property name="geometry">
       <rect>
-       <x>10</x>
-       <y>630</y>
-       <width>491</width>
-       <height>91</height>
+       <x>0</x>
+       <y>370</y>
+       <width>521</width>
+       <height>121</height>
       </rect>
      </property>
      <property name="title">
@@ -54,9 +54,9 @@
      <widget class="QPushButton" name="pushButton_Datenpruefung">
       <property name="geometry">
        <rect>
-        <x>406</x>
-        <y>20</y>
-        <width>84</width>
+        <x>439</x>
+        <y>33</y>
+        <width>80</width>
         <height>25</height>
        </rect>
       </property>
@@ -68,10 +68,13 @@
       <property name="geometry">
        <rect>
         <x>1</x>
-        <y>20</y>
-        <width>401</width>
-        <height>71</height>
+        <y>30</y>
+        <width>431</width>
+        <height>91</height>
        </rect>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">padding-left: 8px; padding-top: 5px;</string>
       </property>
      </widget>
      <widget class="QPushButton" name="pushButton_Import">
@@ -80,9 +83,9 @@
       </property>
       <property name="geometry">
        <rect>
-        <x>407</x>
-        <y>50</y>
-        <width>84</width>
+        <x>440</x>
+        <y>63</y>
+        <width>80</width>
         <height>23</height>
        </rect>
       </property>
@@ -94,9 +97,9 @@
     <widget class="QDialogButtonBox" name="button_box">
      <property name="geometry">
       <rect>
-       <x>10</x>
-       <y>730</y>
-       <width>491</width>
+       <x>0</x>
+       <y>494</y>
+       <width>521</width>
        <height>32</height>
       </rect>
      </property>
@@ -107,389 +110,557 @@
       <set>QDialogButtonBox::Cancel|QDialogButtonBox::Reset</set>
      </property>
     </widget>
-    <widget class="QGroupBox" name="groupBox_2">
+    <widget class="QToolBox" name="toolBox">
      <property name="geometry">
       <rect>
-       <x>10</x>
-       <y>440</y>
-       <width>491</width>
-       <height>181</height>
+       <x>0</x>
+       <y>0</y>
+       <width>521</width>
+       <height>361</height>
       </rect>
      </property>
-     <property name="title">
-      <string>Attribute Haunseinführung</string>
+     <property name="styleSheet">
+      <string notr="true">QToolBox::tab { background-color: lightgreen; }
+QToolBox::tab:selected { background-color: darkgrey; }</string>
      </property>
-     <widget class="QLabel" name="label_11">
-      <property name="geometry">
-       <rect>
-        <x>10</x>
-        <y>64</y>
-        <width>101</width>
-        <height>16</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Kommentar:</string>
-      </property>
-     </widget>
-     <widget class="QLabel" name="label_13">
-      <property name="geometry">
-       <rect>
-        <x>10</x>
-        <y>34</y>
-        <width>111</width>
-        <height>16</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Gefördert:</string>
-      </property>
-     </widget>
-     <widget class="QComboBox" name="comboBox_Gefoerdert">
-      <property name="geometry">
-       <rect>
-        <x>130</x>
-        <y>30</y>
-        <width>181</width>
-        <height>22</height>
-       </rect>
-      </property>
-     </widget>
-     <widget class="QLabel" name="label_14">
-      <property name="geometry">
-       <rect>
-        <x>10</x>
-        <y>95</y>
-        <width>121</width>
-        <height>16</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Beschreibung:</string>
-      </property>
-     </widget>
-     <widget class="QLineEdit" name="label_Kommentar">
-      <property name="geometry">
-       <rect>
-        <x>130</x>
-        <y>60</y>
-        <width>351</width>
-        <height>22</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string/>
-      </property>
-      <property name="placeholderText">
-       <string>Kommentar hier eingeben...</string>
-      </property>
-     </widget>
-     <widget class="QLineEdit" name="label_Kommentar_2">
-      <property name="geometry">
-       <rect>
-        <x>130</x>
-        <y>90</y>
-        <width>351</width>
-        <height>22</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string/>
-      </property>
-      <property name="placeholderText">
-       <string>Beschreibung hier eingeben...</string>
-      </property>
-     </widget>
-     <widget class="QgsDateTimeEdit" name="mDateTimeEdit_Strecke">
-      <property name="geometry">
-       <rect>
-        <x>130</x>
-        <y>120</y>
-        <width>181</width>
-        <height>22</height>
-       </rect>
-      </property>
-      <property name="displayFormat">
-       <string>dd.MM.yyyy</string>
-      </property>
-     </widget>
-     <widget class="QLabel" name="label_22">
-      <property name="geometry">
-       <rect>
-        <x>10</x>
-        <y>125</y>
-        <width>121</width>
-        <height>16</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Verlegt am:</string>
-      </property>
-     </widget>
-    </widget>
-    <widget class="QGroupBox" name="groupBox">
-     <property name="geometry">
-      <rect>
-       <x>10</x>
-       <y>320</y>
-       <width>491</width>
-       <height>111</height>
-      </rect>
+     <property name="frameShape">
+      <enum>QFrame::Box</enum>
      </property>
-     <property name="title">
-      <string>Verlauf Leerrohr</string>
+     <property name="frameShadow">
+      <enum>QFrame::Raised</enum>
      </property>
-     <widget class="QPushButton" name="pushButton_verlauf_HA">
-      <property name="geometry">
-       <rect>
-        <x>10</x>
-        <y>24</y>
-        <width>141</width>
-        <height>25</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Verlauf Hauseinführung</string>
-      </property>
-     </widget>
-     <widget class="QLabel" name="label_8">
-      <property name="geometry">
-       <rect>
-        <x>160</x>
-        <y>30</y>
-        <width>321</width>
-        <height>20</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>bitte erfassen Sie den Verlauf der Hauseinführung in der Karte</string>
-      </property>
-     </widget>
-     <widget class="QPushButton" name="pushButton_adresse">
-      <property name="geometry">
-       <rect>
-        <x>10</x>
-        <y>56</y>
-        <width>141</width>
-        <height>25</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Auswahl Adresspunkt</string>
-      </property>
-     </widget>
-     <widget class="QTextEdit" name="label_adresse">
-      <property name="geometry">
-       <rect>
-        <x>260</x>
-        <y>57</y>
-        <width>221</width>
-        <height>22</height>
-       </rect>
-      </property>
-     </widget>
-     <widget class="QCheckBox" name="checkBox_aufschlieung">
-      <property name="geometry">
-       <rect>
-        <x>13</x>
-        <y>86</y>
-        <width>131</width>
-        <height>18</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Aufschließungspunkt</string>
-      </property>
-     </widget>
-    </widget>
-    <widget class="QGroupBox" name="groupBox_4">
-     <property name="geometry">
-      <rect>
-       <x>10</x>
-       <y>10</y>
-       <width>491</width>
-       <height>291</height>
-      </rect>
+     <property name="currentIndex">
+      <number>0</number>
      </property>
-     <property name="title">
-      <string>Auswahl Parent Leerrohr</string>
-     </property>
-     <widget class="QPushButton" name="pushButton_parentLeerrohr">
-      <property name="geometry">
-       <rect>
-        <x>10</x>
-        <y>56</y>
-        <width>84</width>
-        <height>25</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Parent Leerrohr</string>
-      </property>
-     </widget>
-     <widget class="QTextEdit" name="label_parentLeerrohr">
-      <property name="geometry">
-       <rect>
-        <x>230</x>
-        <y>56</y>
-        <width>251</width>
-        <height>22</height>
-       </rect>
-      </property>
-     </widget>
-     <widget class="QLabel" name="label_9">
-      <property name="geometry">
-       <rect>
-        <x>102</x>
-        <y>60</y>
-        <width>121</width>
-        <height>20</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>gewählter Verbund: </string>
-      </property>
-      <property name="alignment">
-       <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-      </property>
-     </widget>
-     <widget class="QGraphicsView" name="graphicsView_Farben_Rohre">
+     <widget class="QWidget" name="page">
       <property name="geometry">
        <rect>
         <x>0</x>
-        <y>230</y>
-        <width>491</width>
-        <height>61</height>
+        <y>0</y>
+        <width>517</width>
+        <height>273</height>
        </rect>
       </property>
+      <attribute name="label">
+       <string>Auswahl Parent Leerrohr</string>
+      </attribute>
+      <widget class="QTextEdit" name="label_farbschema">
+       <property name="geometry">
+        <rect>
+         <x>220</x>
+         <y>94</y>
+         <width>251</width>
+         <height>22</height>
+        </rect>
+       </property>
+      </widget>
+      <widget class="QLabel" name="label_12">
+       <property name="geometry">
+        <rect>
+         <x>0</x>
+         <y>194</y>
+         <width>321</width>
+         <height>20</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>bitte wählen Sie die korrekte Rohrnummer bzw. Farbe:</string>
+       </property>
+      </widget>
+      <widget class="QLabel" name="label_9">
+       <property name="geometry">
+        <rect>
+         <x>92</x>
+         <y>41</y>
+         <width>121</width>
+         <height>20</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>gewählter Verbund: </string>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+       </property>
+      </widget>
+      <widget class="QLabel" name="label_17">
+       <property name="geometry">
+        <rect>
+         <x>100</x>
+         <y>121</y>
+         <width>111</width>
+         <height>20</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>Firma:</string>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+       </property>
+      </widget>
+      <widget class="QPushButton" name="pushButton_verteiler">
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>7</y>
+         <width>141</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>Auswahl Verteilerkasten</string>
+       </property>
+      </widget>
+      <widget class="QLabel" name="label_10">
+       <property name="geometry">
+        <rect>
+         <x>100</x>
+         <y>67</y>
+         <width>111</width>
+         <height>20</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>verwendeter Subtyp:</string>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+       </property>
+      </widget>
+      <widget class="QCheckBox" name="checkBox_direkt">
+       <property name="geometry">
+        <rect>
+         <x>16</x>
+         <y>67</y>
+         <width>67</width>
+         <height>18</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>direkt</string>
+       </property>
+      </widget>
+      <widget class="QTextEdit" name="label_firma">
+       <property name="geometry">
+        <rect>
+         <x>220</x>
+         <y>122</y>
+         <width>251</width>
+         <height>22</height>
+        </rect>
+       </property>
+      </widget>
+      <widget class="QLabel" name="label_16">
+       <property name="geometry">
+        <rect>
+         <x>100</x>
+         <y>93</y>
+         <width>111</width>
+         <height>20</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>Farbschema:</string>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+       </property>
+      </widget>
+      <widget class="QTextEdit" name="label_verteiler">
+       <property name="geometry">
+        <rect>
+         <x>220</x>
+         <y>8</y>
+         <width>251</width>
+         <height>22</height>
+        </rect>
+       </property>
+      </widget>
+      <widget class="QGraphicsView" name="graphicsView_Farben_Rohre">
+       <property name="geometry">
+        <rect>
+         <x>0</x>
+         <y>214</y>
+         <width>521</width>
+         <height>61</height>
+        </rect>
+       </property>
+       <property name="styleSheet">
+        <string notr="true">padding-left: 10px; padding-top: 6px;</string>
+       </property>
+      </widget>
+      <widget class="QTextEdit" name="label_subtyp">
+       <property name="geometry">
+        <rect>
+         <x>220</x>
+         <y>66</y>
+         <width>251</width>
+         <height>22</height>
+        </rect>
+       </property>
+      </widget>
+      <widget class="QPushButton" name="pushButton_parentLeerrohr">
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>37</y>
+         <width>84</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>Parent Leerrohr</string>
+       </property>
+      </widget>
+      <widget class="QTextEdit" name="label_parentLeerrohr">
+       <property name="geometry">
+        <rect>
+         <x>220</x>
+         <y>37</y>
+         <width>251</width>
+         <height>22</height>
+        </rect>
+       </property>
+      </widget>
+      <widget class="QPushButton" name="pushButton_select_leerrohr">
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>156</y>
+         <width>141</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>Hauseinführung Bestand</string>
+       </property>
+      </widget>
+      <widget class="QLabel" name="label_gewaehlte_haueinfuehrung">
+       <property name="geometry">
+        <rect>
+         <x>220</x>
+         <y>157</y>
+         <width>251</width>
+         <height>22</height>
+        </rect>
+       </property>
+       <property name="autoFillBackground">
+        <bool>false</bool>
+       </property>
+       <property name="styleSheet">
+        <string notr="true">background-color: grey;</string>
+       </property>
+       <property name="inputMethodHints">
+        <set>Qt::ImhNone</set>
+       </property>
+       <property name="frameShape">
+        <enum>QFrame::Box</enum>
+       </property>
+       <property name="frameShadow">
+        <enum>QFrame::Plain</enum>
+       </property>
+       <property name="lineWidth">
+        <number>1</number>
+       </property>
+       <property name="text">
+        <string>Hauseinführung wählen (optional)</string>
+       </property>
+      </widget>
      </widget>
-     <widget class="QLabel" name="label_16">
+     <widget class="QWidget" name="page_2">
       <property name="geometry">
        <rect>
-        <x>110</x>
-        <y>112</y>
-        <width>111</width>
-        <height>20</height>
+        <x>0</x>
+        <y>0</y>
+        <width>517</width>
+        <height>273</height>
        </rect>
       </property>
-      <property name="text">
-       <string>Farbschema:</string>
-      </property>
-      <property name="alignment">
-       <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-      </property>
+      <attribute name="label">
+       <string>Verlauf Leerrohr</string>
+      </attribute>
+      <widget class="QPushButton" name="pushButton_adresse">
+       <property name="geometry">
+        <rect>
+         <x>0</x>
+         <y>32</y>
+         <width>141</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>Auswahl Adresspunkt</string>
+       </property>
+      </widget>
+      <widget class="QCheckBox" name="checkBox_aufschlieung">
+       <property name="geometry">
+        <rect>
+         <x>3</x>
+         <y>62</y>
+         <width>131</width>
+         <height>18</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>Aufschließungspunkt</string>
+       </property>
+      </widget>
+      <widget class="QLabel" name="label_8">
+       <property name="geometry">
+        <rect>
+         <x>150</x>
+         <y>6</y>
+         <width>321</width>
+         <height>20</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>bitte erfassen Sie den Verlauf der Hauseinführung in der Karte</string>
+       </property>
+      </widget>
+      <widget class="QTextEdit" name="label_adresse">
+       <property name="geometry">
+        <rect>
+         <x>250</x>
+         <y>33</y>
+         <width>221</width>
+         <height>22</height>
+        </rect>
+       </property>
+      </widget>
+      <widget class="QPushButton" name="pushButton_verlauf_HA">
+       <property name="geometry">
+        <rect>
+         <x>0</x>
+         <y>0</y>
+         <width>141</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>Verlauf Hauseinführung</string>
+       </property>
+      </widget>
      </widget>
-     <widget class="QTextEdit" name="label_subtyp">
+     <widget class="QWidget" name="page_3">
       <property name="geometry">
        <rect>
-        <x>230</x>
-        <y>85</y>
-        <width>251</width>
-        <height>22</height>
+        <x>0</x>
+        <y>0</y>
+        <width>517</width>
+        <height>273</height>
        </rect>
       </property>
+      <attribute name="label">
+       <string>Attribute Haunseinführung</string>
+      </attribute>
+      <widget class="QLineEdit" name="label_Kommentar_2">
+       <property name="geometry">
+        <rect>
+         <x>130</x>
+         <y>65</y>
+         <width>351</width>
+         <height>22</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string/>
+       </property>
+       <property name="placeholderText">
+        <string>Beschreibung hier eingeben...</string>
+       </property>
+      </widget>
+      <widget class="QComboBox" name="comboBox_Status">
+       <property name="geometry">
+        <rect>
+         <x>130</x>
+         <y>125</y>
+         <width>181</width>
+         <height>22</height>
+        </rect>
+       </property>
+      </widget>
+      <widget class="QgsDateTimeEdit" name="mDateTimeEdit_Strecke">
+       <property name="geometry">
+        <rect>
+         <x>130</x>
+         <y>95</y>
+         <width>181</width>
+         <height>22</height>
+        </rect>
+       </property>
+       <property name="displayFormat">
+        <string>dd.MM.yyyy</string>
+       </property>
+      </widget>
+      <widget class="QLabel" name="label_18">
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>126</y>
+         <width>121</width>
+         <height>20</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>Status:</string>
+       </property>
+      </widget>
+      <widget class="QLabel" name="label_13">
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>9</y>
+         <width>111</width>
+         <height>16</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>Gefördert:</string>
+       </property>
+      </widget>
+      <widget class="QLineEdit" name="label_Kommentar">
+       <property name="geometry">
+        <rect>
+         <x>130</x>
+         <y>35</y>
+         <width>351</width>
+         <height>22</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string/>
+       </property>
+       <property name="placeholderText">
+        <string>Kommentar hier eingeben...</string>
+       </property>
+      </widget>
+      <widget class="QComboBox" name="comboBox_Foerderung">
+       <property name="geometry">
+        <rect>
+         <x>186</x>
+         <y>5</y>
+         <width>291</width>
+         <height>22</height>
+        </rect>
+       </property>
+      </widget>
+      <widget class="QLabel" name="label_11">
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>39</y>
+         <width>101</width>
+         <height>16</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>Kommentar:</string>
+       </property>
+      </widget>
+      <widget class="QLabel" name="label_14">
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>70</y>
+         <width>121</width>
+         <height>16</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>Beschreibung:</string>
+       </property>
+      </widget>
+      <widget class="QLabel" name="label_22">
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>100</y>
+         <width>121</width>
+         <height>16</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>Verlegt am:</string>
+       </property>
+      </widget>
+      <widget class="QLabel" name="label_19">
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>155</y>
+         <width>121</width>
+         <height>20</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>Befestigt:</string>
+       </property>
+      </widget>
+      <widget class="QCheckBox" name="checkBox_Befestigt">
+       <property name="geometry">
+        <rect>
+         <x>132</x>
+         <y>154</y>
+         <width>91</width>
+         <height>18</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>Asphaltdecke</string>
+       </property>
+      </widget>
+      <widget class="QCheckBox" name="checkBox_Gefoerdert">
+       <property name="geometry">
+        <rect>
+         <x>133</x>
+         <y>8</y>
+         <width>91</width>
+         <height>18</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>JA</string>
+       </property>
+      </widget>
+      <widget class="QLabel" name="label_20">
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>181</y>
+         <width>111</width>
+         <height>20</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>Eigner:</string>
+       </property>
+      </widget>
+      <widget class="QComboBox" name="comboBox_Eigner">
+       <property name="geometry">
+        <rect>
+         <x>130</x>
+         <y>180</y>
+         <width>181</width>
+         <height>22</height>
+        </rect>
+       </property>
+      </widget>
      </widget>
-     <widget class="QLabel" name="label_10">
-      <property name="geometry">
-       <rect>
-        <x>110</x>
-        <y>86</y>
-        <width>111</width>
-        <height>20</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>verwendeter Subtyp:</string>
-      </property>
-      <property name="alignment">
-       <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-      </property>
-     </widget>
-     <widget class="QTextEdit" name="label_farbschema">
-      <property name="geometry">
-       <rect>
-        <x>230</x>
-        <y>113</y>
-        <width>251</width>
-        <height>22</height>
-       </rect>
-      </property>
-     </widget>
-     <widget class="QLabel" name="label_12">
-      <property name="geometry">
-       <rect>
-        <x>10</x>
-        <y>210</y>
-        <width>321</width>
-        <height>20</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>bitte wählen Sie die korrekte Rohrnummer bzw. Farbe:</string>
-      </property>
-     </widget>
-     <widget class="QCheckBox" name="checkBox_direkt">
-      <property name="geometry">
-       <rect>
-        <x>14</x>
-        <y>86</y>
-        <width>67</width>
-        <height>18</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>direkt</string>
-      </property>
-     </widget>
-     <widget class="QPushButton" name="pushButton_verteiler">
-      <property name="geometry">
-       <rect>
-        <x>10</x>
-        <y>26</y>
-        <width>141</width>
-        <height>25</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Auswahl Verteilerkasten</string>
-      </property>
-     </widget>
-     <widget class="QTextEdit" name="label_verteiler">
-      <property name="geometry">
-       <rect>
-        <x>230</x>
-        <y>27</y>
-        <width>251</width>
-        <height>22</height>
-       </rect>
-      </property>
-     </widget>
-     <widget class="QTextEdit" name="label_firma">
-      <property name="geometry">
-       <rect>
-        <x>230</x>
-        <y>141</y>
-        <width>251</width>
-        <height>22</height>
-       </rect>
-      </property>
-     </widget>
-     <widget class="QLabel" name="label_17">
-      <property name="geometry">
-       <rect>
-        <x>110</x>
-        <y>140</y>
-        <width>111</width>
-        <height>20</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Firma:</string>
-      </property>
-      <property name="alignment">
-       <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-      </property>
-     </widget>
+    </widget>
+    <widget class="QCheckBox" name="checkBox_Mehrfachimport">
+     <property name="geometry">
+      <rect>
+       <x>200</x>
+       <y>500</y>
+       <width>101</width>
+       <height>20</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Merhfachimport</string>
+     </property>
     </widget>
    </widget>
   </widget>

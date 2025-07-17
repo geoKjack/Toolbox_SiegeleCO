@@ -1,0 +1,562 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>LeerrohrVerlegungsToolDialogBase</class>
+ <widget class="QDialog" name="LeerrohrVerlegungsToolDialogBase">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>627</width>
+    <height>852</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Leerrohr Verlegen</string>
+  </property>
+  <widget class="QTabWidget" name="tabWidget">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>631</width>
+     <height>841</height>
+    </rect>
+   </property>
+   <property name="font">
+    <font>
+     <weight>50</weight>
+     <italic>false</italic>
+     <bold>false</bold>
+    </font>
+   </property>
+   <property name="autoFillBackground">
+    <bool>false</bool>
+   </property>
+   <property name="currentIndex">
+    <number>0</number>
+   </property>
+   <widget class="QWidget" name="tab">
+    <attribute name="title">
+     <string>Einstellungen</string>
+    </attribute>
+    <widget class="QGroupBox" name="groupBox">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>6</y>
+       <width>611</width>
+       <height>811</height>
+      </rect>
+     </property>
+     <property name="title">
+      <string>Verbindungseinstellungen</string>
+     </property>
+     <widget class="QLabel" name="label_18">
+      <property name="geometry">
+       <rect>
+        <x>7</x>
+        <y>131</y>
+        <width>111</width>
+        <height>20</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Firma:</string>
+      </property>
+     </widget>
+     <widget class="QComboBox" name="comboBox_Auftraggeber">
+      <property name="geometry">
+       <rect>
+        <x>8</x>
+        <y>520</y>
+        <width>165</width>
+        <height>22</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_gewaehlter_Auftraggeber">
+      <property name="geometry">
+       <rect>
+        <x>208</x>
+        <y>520</y>
+        <width>171</width>
+        <height>22</height>
+       </rect>
+      </property>
+      <property name="frameShape">
+       <enum>QFrame::Box</enum>
+      </property>
+      <property name="text">
+       <string>Gewählter Auftraggeber</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_7">
+      <property name="geometry">
+       <rect>
+        <x>208</x>
+        <y>499</y>
+        <width>111</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>gewählter Auftraggber:</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_3">
+      <property name="geometry">
+       <rect>
+        <x>8</x>
+        <y>500</y>
+        <width>121</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Auftraggeber auswählen</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_21">
+      <property name="geometry">
+       <rect>
+        <x>7</x>
+        <y>104</y>
+        <width>251</width>
+        <height>20</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Firma und Eigner auswählen :</string>
+      </property>
+     </widget>
+     <widget class="QDialogButtonBox" name="button_box">
+      <property name="geometry">
+       <rect>
+        <x>190</x>
+        <y>770</y>
+        <width>401</width>
+        <height>32</height>
+       </rect>
+      </property>
+      <property name="orientation">
+       <enum>Qt::Horizontal</enum>
+      </property>
+      <property name="standardButtons">
+       <set>QDialogButtonBox::Apply|QDialogButtonBox::Cancel|QDialogButtonBox::Discard|QDialogButtonBox::Open|QDialogButtonBox::Reset</set>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_24">
+      <property name="geometry">
+       <rect>
+        <x>197</x>
+        <y>130</y>
+        <width>111</width>
+        <height>20</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Eigner:</string>
+      </property>
+     </widget>
+     <widget class="QTableView" name="tableView">
+      <property name="geometry">
+       <rect>
+        <x>0</x>
+        <y>600</y>
+        <width>601</width>
+        <height>161</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QListWidget" name="listWidget_Firma">
+      <property name="geometry">
+       <rect>
+        <x>47</x>
+        <y>131</y>
+        <width>141</width>
+        <height>51</height>
+       </rect>
+      </property>
+      <property name="selectionMode">
+       <enum>QAbstractItemView::MultiSelection</enum>
+      </property>
+     </widget>
+     <widget class="QLineEdit" name="label_Kommentar_3">
+      <property name="geometry">
+       <rect>
+        <x>127</x>
+        <y>47</y>
+        <width>221</width>
+        <height>22</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string/>
+      </property>
+      <property name="placeholderText">
+       <string>Username hier eingeben</string>
+      </property>
+     </widget>
+     <widget class="QLineEdit" name="label_Kommentar_5">
+      <property name="geometry">
+       <rect>
+        <x>127</x>
+        <y>75</y>
+        <width>221</width>
+        <height>22</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string/>
+      </property>
+      <property name="placeholderText">
+       <string>Passwort hier eingeben</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_22">
+      <property name="geometry">
+       <rect>
+        <x>7</x>
+        <y>25</y>
+        <width>111</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Umgebung Auswählen:</string>
+      </property>
+     </widget>
+     <widget class="QComboBox" name="comboBox_Umgebung">
+      <property name="geometry">
+       <rect>
+        <x>128</x>
+        <y>22</y>
+        <width>110</width>
+        <height>22</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_20">
+      <property name="geometry">
+       <rect>
+        <x>7</x>
+        <y>51</y>
+        <width>101</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Username eingeben:</string>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="pushButton_Verbindung">
+      <property name="geometry">
+       <rect>
+        <x>245</x>
+        <y>21</y>
+        <width>101</width>
+        <height>23</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Verbinden</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_23">
+      <property name="geometry">
+       <rect>
+        <x>7</x>
+        <y>75</y>
+        <width>101</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Passwort eingeben:</string>
+      </property>
+     </widget>
+     <widget class="QListWidget" name="listWidget_Eigner">
+      <property name="geometry">
+       <rect>
+        <x>247</x>
+        <y>130</y>
+        <width>141</width>
+        <height>51</height>
+       </rect>
+      </property>
+      <property name="selectionMode">
+       <enum>QAbstractItemView::MultiSelection</enum>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_25">
+      <property name="geometry">
+       <rect>
+        <x>9</x>
+        <y>556</y>
+        <width>101</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Name des Setup</string>
+      </property>
+     </widget>
+     <widget class="QLineEdit" name="lineEdit_Name">
+      <property name="geometry">
+       <rect>
+        <x>108</x>
+        <y>553</y>
+        <width>271</width>
+        <height>20</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="pushButton_Verbindung_Trennen">
+      <property name="geometry">
+       <rect>
+        <x>352</x>
+        <y>21</y>
+        <width>121</width>
+        <height>23</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Verbindung Trennen</string>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="pushButton_Save">
+      <property name="geometry">
+       <rect>
+        <x>388</x>
+        <y>550</y>
+        <width>101</width>
+        <height>23</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Speichern</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_Setup">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>776</y>
+        <width>151</width>
+        <height>21</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Aktives Setup:</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_qgz">
+      <property name="geometry">
+       <rect>
+        <x>407</x>
+        <y>158</y>
+        <width>191</width>
+        <height>21</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>augewälte *.qgz</string>
+      </property>
+     </widget>
+     <widget class="QgsFileWidget" name="mQgsFileWidget">
+      <property name="geometry">
+       <rect>
+        <x>407</x>
+        <y>128</y>
+        <width>191</width>
+        <height>27</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_26">
+      <property name="geometry">
+       <rect>
+        <x>407</x>
+        <y>104</y>
+        <width>251</width>
+        <height>20</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>QGIS Projekt wählen:</string>
+      </property>
+     </widget>
+     <widget class="QToolBox" name="toolBox">
+      <property name="geometry">
+       <rect>
+        <x>0</x>
+        <y>190</y>
+        <width>601</width>
+        <height>301</height>
+       </rect>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">QToolBox::tab { background-color: lightgreen; }
+QToolBox::tab:selected { background-color: darkgrey; }</string>
+      </property>
+      <property name="frameShape">
+       <enum>QFrame::Box</enum>
+      </property>
+      <property name="frameShadow">
+       <enum>QFrame::Raised</enum>
+      </property>
+      <property name="currentIndex">
+       <number>0</number>
+      </property>
+      <widget class="QWidget" name="page">
+       <property name="geometry">
+        <rect>
+         <x>0</x>
+         <y>0</y>
+         <width>597</width>
+         <height>241</height>
+        </rect>
+       </property>
+       <attribute name="label">
+        <string>Codierung:</string>
+       </attribute>
+       <widget class="QTabWidget" name="tabWidget_2">
+        <property name="geometry">
+         <rect>
+          <x>0</x>
+          <y>0</y>
+          <width>601</width>
+          <height>251</height>
+         </rect>
+        </property>
+        <property name="currentIndex">
+         <number>0</number>
+        </property>
+        <widget class="QWidget" name="tab_2">
+         <attribute name="title">
+          <string>Leerrohr</string>
+         </attribute>
+         <widget class="QListWidget" name="listWidget_Leerohr">
+          <property name="geometry">
+           <rect>
+            <x>0</x>
+            <y>5</y>
+            <width>601</width>
+            <height>221</height>
+           </rect>
+          </property>
+          <property name="selectionMode">
+           <enum>QAbstractItemView::MultiSelection</enum>
+          </property>
+         </widget>
+        </widget>
+        <widget class="QWidget" name="tab_3">
+         <attribute name="title">
+          <string>Bündel</string>
+         </attribute>
+         <widget class="QListWidget" name="listWidget_Buendel">
+          <property name="geometry">
+           <rect>
+            <x>0</x>
+            <y>5</y>
+            <width>601</width>
+            <height>221</height>
+           </rect>
+          </property>
+          <property name="selectionMode">
+           <enum>QAbstractItemView::MultiSelection</enum>
+          </property>
+         </widget>
+        </widget>
+        <widget class="QWidget" name="tab_4">
+         <attribute name="title">
+          <string>Faser</string>
+         </attribute>
+         <widget class="QListWidget" name="listWidget_Faser">
+          <property name="geometry">
+           <rect>
+            <x>0</x>
+            <y>5</y>
+            <width>601</width>
+            <height>221</height>
+           </rect>
+          </property>
+          <property name="selectionMode">
+           <enum>QAbstractItemView::MultiSelection</enum>
+          </property>
+         </widget>
+        </widget>
+       </widget>
+      </widget>
+      <widget class="QWidget" name="page_2">
+       <property name="geometry">
+        <rect>
+         <x>0</x>
+         <y>0</y>
+         <width>98</width>
+         <height>28</height>
+        </rect>
+       </property>
+       <attribute name="label">
+        <string>SubTypen laut gewählter Codierung:</string>
+       </attribute>
+       <widget class="QTabWidget" name="tabWidget_6">
+        <property name="geometry">
+         <rect>
+          <x>0</x>
+          <y>0</y>
+          <width>601</width>
+          <height>241</height>
+         </rect>
+        </property>
+        <property name="currentIndex">
+         <number>0</number>
+        </property>
+        <widget class="QWidget" name="tab_14">
+         <attribute name="title">
+          <string>Leerrohr</string>
+         </attribute>
+         <widget class="QListWidget" name="listWidget_Leerohr_SubTyp">
+          <property name="geometry">
+           <rect>
+            <x>0</x>
+            <y>5</y>
+            <width>591</width>
+            <height>211</height>
+           </rect>
+          </property>
+          <property name="selectionMode">
+           <enum>QAbstractItemView::MultiSelection</enum>
+          </property>
+         </widget>
+         <widget class="QPushButton" name="pushButton_Codierung">
+          <property name="geometry">
+           <rect>
+            <x>453</x>
+            <y>190</y>
+            <width>121</width>
+            <height>23</height>
+           </rect>
+          </property>
+          <property name="text">
+           <string>Codierung aktualisieren</string>
+          </property>
+         </widget>
+        </widget>
+       </widget>
+      </widget>
+     </widget>
+    </widget>
+   </widget>
+  </widget>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>QgsFileWidget</class>
+   <extends>QWidget</extends>
+   <header>qgsfilewidget.h</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

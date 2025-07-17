@@ -2,9 +2,9 @@ import re  # Hinzufügen des Imports für reguläre Ausdrücke
 import logging
 from qgis.core import QgsVectorLayer, QgsFeature, QgsProject, QgsDataSourceUri, Qgis, QgsGeometry, QgsFeatureRequest, QgsMessageLog, QgsProviderRegistry
 from qgis.gui import QgsMapToolEmitPoint, QgsHighlight
-from qgis.PyQt.QtCore import Qt, QDate, QSettings, QPointF, QTimer
-from qgis.PyQt.QtGui import QColor, QBrush, QPen, QFont, QPolygonF, QTextOption
-from qgis.PyQt.QtWidgets import QDialog, QDialogButtonBox, QCheckBox, QMessageBox, QGraphicsScene, QGraphicsEllipseItem, QListWidget, QGraphicsPolygonItem, QGraphicsRectItem, QGraphicsLineItem, QAbstractItemView, QGraphicsTextItem, QGraphicsItem, QListWidgetItem
+from qgis.PyQt.QtCore import Qt, QDate, QSettings, QPointF
+from qgis.PyQt.QtGui import QColor, QBrush, QPen, QFont, QPolygonF
+from qgis.PyQt.QtWidgets import QDialog, QDialogButtonBox, QCheckBox, QMessageBox, QGraphicsScene, QGraphicsEllipseItem, QListWidget, QGraphicsPolygonItem, QGraphicsRectItem, QGraphicsLineItem, QAbstractItemView
 from .leerrohr_verlegen_dialog import Ui_LeerrohrVerlegungsToolDialogBase
 import psycopg2
 import json
@@ -21,8 +21,6 @@ class LeerrohrVerlegenTool(QDialog):
         self.iface = iface
         self.ui = Ui_LeerrohrVerlegungsToolDialogBase()
         self.ui.setupUi(self)
-        self.ui.listWidget_Leerrohr.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.ui.listWidget_Leerrohr.itemClicked.connect(self.handle_leerrohr_selection_from_list)
         self.setWindowFlag(Qt.WindowStaysOnTopHint)
 
         # Variablen für die gewählten Objekte
@@ -50,24 +48,7 @@ class LeerrohrVerlegenTool(QDialog):
         # Setup-Settings initialisieren
         self.settings = QSettings("SiegeleCo", "ToolBox")
         self.db_details = None
-        try:
-            self.conn = psycopg2.connect(**self.db_details)
-            self.cur = self.conn.cursor()
-            print("DEBUG: Persistente DB-Verbindung geöffnet")
-        except Exception as e:
-            print(f"DEBUG: Fehler bei persistenter DB-Verbindung: {e}")
-            self.conn = None
-            self.cur = None
         self.is_connected = False
-
-        # Neue Ergänzung: Dictionary für Subtyp-Quantitäten
-        self.subtyp_quantities = {}  # subtyp_id -> quantity (int, Default: 1)
-
-        # Neue Ergänzung: Persistente Scene für Subtyp-Auswahl
-        self.subtyp_scene = QGraphicsScene()
-        self.ui.graphicsView_Auswahl_Subtyp.setScene(self.subtyp_scene)
-        self.ui.graphicsView_Auswahl_Subtyp.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.ui.graphicsView_Auswahl_Subtyp.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
         # Lade Setup-Daten
         self.load_setup_data()
@@ -115,30 +96,6 @@ class LeerrohrVerlegenTool(QDialog):
 
         print(f"DEBUG: Initialer Status von Verbundnummer: {self.ui.comboBox_Verbundnummer.currentText()}, Enabled: {self.ui.comboBox_Verbundnummer.isEnabled()}")
         QgsMessageLog.logMessage(str(dir(self.ui)), "Leerrohr-Tool", level=Qgis.Info)
-
-    class DuplicateButtonItem(QGraphicsTextItem):
-        def __init__(self, subtyp_id, parent_tool):
-            super().__init__("+")  # Text: '+' als Button-Symbol
-            self.subtyp_id = subtyp_id
-            self.parent_tool = parent_tool  # Referenz auf LeerrohrVerlegenTool
-            self.setFont(QFont("Arial", 12, QFont.Bold))
-            self.setDefaultTextColor(Qt.blue)  # Blau für Klickbarkeit
-            self.setFlags(QGraphicsItem.ItemIsSelectable | QGraphicsItem.ItemIsFocusable)
-            self.setCursor(Qt.PointingHandCursor)  # Hand-Cursor für Button-Feeling
-            self.setToolTip("Klicken, um diesen Subtyp zu duplizieren")
-
-        def mousePressEvent(self, event):
-            if event.button() == Qt.LeftButton:
-                # Erhöhe Quantity
-                if self.subtyp_id in self.parent_tool.subtyp_quantities:
-                    self.parent_tool.subtyp_quantities[self.subtyp_id] += 1
-                else:
-                    self.parent_tool.subtyp_quantities[self.subtyp_id] = 2  # Start bei 2, da 1 schon da ist
-                print(f"DEBUG: Subtyp {self.subtyp_id} dupliziert – neue Anzahl: {self.parent_tool.subtyp_quantities[self.subtyp_id]}")
-                
-                # Asynchroner Update-Aufruf, um Crash zu vermeiden
-                QTimer.singleShot(0, self.parent_tool.update_selected_leerrohr_subtyp)
-            super().mousePressEvent(event)
 
     def load_setup_data(self):
         """Lädt Datenbankverbindung und Subtypen aus dem aktiven Setup."""
@@ -314,26 +271,6 @@ class LeerrohrVerlegenTool(QDialog):
                 conn.close()
             return None
 
-    def handle_leerrohr_selection_from_list(self, item):
-        """Handhabt die Auswahl eines Leerrohrs aus dem ListWidget."""
-        import time
-        start_time = time.time()
-        if item:
-            selected_feature = item.data(Qt.UserRole)
-            if selected_feature:
-                is_abzweigung = self.ui.radioButton_Abzweigung.isChecked()
-                layer_name = "LWL_Leerrohr_Abzweigung" if is_abzweigung else "LWL_Leerrohr"
-                layer = QgsProject.instance().mapLayersByName(layer_name)
-                if layer:
-                    layer = layer[0]
-                else:
-                    print(f"DEBUG: Layer {layer_name} nicht gefunden in Handler")
-                    return
-                self.process_selected_leerrohr(selected_feature, is_abzweigung, layer)
-                # Optional: ListWidget nach Auswahl leeren
-                self.ui.listWidget_Leerrohr.clear()
-        print(f"DEBUG: Zeit für List-Auswahl-Handler: {time.time() - start_time:.2f} Sekunden")
-
     def handle_subtyp_selection(self):
         """Handhabt die Auswahl eines Subtyps, indem andere Subtypen abgewählt werden."""
         print("DEBUG: Starte handle_subtyp_selection")
@@ -370,7 +307,7 @@ class LeerrohrVerlegenTool(QDialog):
                 self.ui.label_Parent_Leerrohr.setStyleSheet("background-color: lightcoral;")
             self.ui.pushButton_verteiler.setText("Startknoten Abzweigung")
             self.ui.pushButton_verteiler_2.setText("Endknoten Abzweigung")
-            self.ui.pushButton_select_leerrohr.setText("Abzweigung Bestand")
+            self.ui.pushButton_select_leerrohr.setText("Abzweigung")
             self.ui.comboBox_Verbundnummer.setEnabled(False)
             self.ui.checkBox_Foerderung.setEnabled(False)
             self.ui.checkBox_Subduct.setEnabled(False)
@@ -406,7 +343,7 @@ class LeerrohrVerlegenTool(QDialog):
             self.selected_parent_leerrohr = None
             self.ui.pushButton_verteiler.setText("Startknoten auswählen")
             self.ui.pushButton_verteiler_2.setText("Endknoten auswählen")
-            self.ui.pushButton_select_leerrohr.setText("Leerrohr Bestand")
+            self.ui.pushButton_select_leerrohr.setText("Leerrohr")
             self.ui.comboBox_Verbundnummer.setEnabled(True)
             self.ui.checkBox_Foerderung.setEnabled(True)
             self.ui.checkBox_Subduct.setEnabled(True)
@@ -878,263 +815,231 @@ class LeerrohrVerlegenTool(QDialog):
                     item = list_widget.item(i)
                     item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
                     item.setSelected(False)
-            self.ui.listWidget_Leerrohr.clear()  # Neues Widget leeren
             return
         layer = layer[0]
         print(f"DEBUG: Layer {layer_name} erfolgreich geladen")
 
         map_scale = self.iface.mapCanvas().scale()
-        threshold_distance = 4 * (map_scale / (39.37 * 96))  # Skalierter Radius: Bei Zoom 1:1000
+        threshold_distance = 10 * (map_scale / (39.37 * 96))
+
+        nearest_feature = None
+        nearest_distance = float("inf")
 
         buffer = QgsGeometry.fromPointXY(point).buffer(threshold_distance, 8)
         request = QgsFeatureRequest().setFilterRect(buffer.boundingBox())
 
-        candidates = []  # Liste aller Kandidaten im Radius
         for feature in layer.getFeatures(request):
             distance = feature.geometry().distance(QgsGeometry.fromPointXY(point))
-            if distance <= threshold_distance:
-                candidates.append(feature)
+            if distance < nearest_distance:
+                nearest_distance = distance
+                nearest_feature = feature
 
-        # ListWidget leeren vor Befüllung
-        self.ui.listWidget_Leerrohr.clear()
+        if nearest_feature and nearest_distance <= threshold_distance:
+            leerrohr_id = nearest_feature["id"]
+            if is_abzweigung:
+                self.selected_leerrohr = {
+                    "id": leerrohr_id,
+                    "ID_TRASSE": nearest_feature["ID_TRASSE"],
+                    "VONKNOTEN": nearest_feature["VONKNOTEN"],
+                    "NACHKNOTEN": nearest_feature["NACHKNOTEN"],
+                    "TYP": nearest_feature["TYP"],
+                    "SUBTYP": nearest_feature["SUBTYP"],
+                    "CODIERUNG": nearest_feature["CODIERUNG"],
+                    "VERBUNDNUMMER": None,  # Abzweigungen haben keine Verbundnummer
+                    "GEFOERDERT": False,    # Abzweigungen haben keine Förderung
+                    "SUBDUCT": False,       # Abzweigungen haben keinen Subduct
+                    "PARENT_LEERROHR_ID": nearest_feature["ID_PARENT_LEERROHR"],
+                    "FIRMA_HERSTELLER": None,
+                    "KOMMENTAR": None,
+                    "BESCHREIBUNG": None,
+                    "VERLEGT_AM": None,
+                    "COUNT": nearest_feature["COUNT"],
+                    "STATUS": nearest_feature["STATUS"],
+                    "VKG_LR": nearest_feature["VKG_LR"]
+                }
+                self.ui.label_gewaehltes_leerrohr.setText(f"Abzweigung ID: {leerrohr_id}")
+            else:
+                self.selected_leerrohr = {
+                    "id": leerrohr_id,
+                    "ID_TRASSE": nearest_feature["ID_TRASSE"],
+                    "VONKNOTEN": nearest_feature["VONKNOTEN"],
+                    "NACHKNOTEN": nearest_feature["NACHKNOTEN"],
+                    "TYP": nearest_feature["TYP"],
+                    "SUBTYP": nearest_feature["SUBTYP"],
+                    "CODIERUNG": nearest_feature["CODIERUNG"],
+                    "VERBUNDNUMMER": nearest_feature["VERBUNDNUMMER"],
+                    "GEFOERDERT": nearest_feature["GEFOERDERT"],
+                    "SUBDUCT": nearest_feature["SUBDUCT"],
+                    "PARENT_LEERROHR_ID": nearest_feature["PARENT_LEERROHR_ID"],
+                    "FIRMA_HERSTELLER": nearest_feature["FIRMA_HERSTELLER"],
+                    "KOMMENTAR": nearest_feature["KOMMENTAR"],
+                    "BESCHREIBUNG": nearest_feature["BESCHREIBUNG"],
+                    "VERLEGT_AM": nearest_feature["VERLEGT_AM"],
+                    "COUNT": nearest_feature["COUNT"],
+                    "STATUS": nearest_feature["STATUS"],
+                    "VKG_LR": nearest_feature["VKG_LR"]
+                }
+                self.ui.label_gewaehltes_leerrohr.setText(f"Leerrohr ID: {leerrohr_id}")
 
-        if not candidates:
-            self.ui.label_gewaehltes_leerrohr.setText("Kein Leerrohr in Reichweite gefunden")
-            self.ui.label_gewaehltes_leerrohr.setStyleSheet("background-color: lightcoral;")
-            return
+            self.selected_verteiler = nearest_feature["VONKNOTEN"]
+            self.selected_verteiler_2 = nearest_feature["NACHKNOTEN"]
+            self.ui.label_gewaehlter_verteiler.setText(f"Startknoten: {self.selected_verteiler}")
+            self.ui.label_gewaehlter_verteiler.setStyleSheet("background-color: lightgreen;")
+            self.ui.label_gewaehlter_verteiler_2.setText(f"Endknoten: {self.selected_verteiler_2}")
+            self.ui.label_gewaehltes_leerrohr.setStyleSheet("background-color: lightgreen;")
+            self.ui.label_gewaehlter_verteiler_2.setStyleSheet("background-color: lightgreen;")
+            # Verbundnummer aus der Datenbank laden und comboBox füllen
+            try:
+                with psycopg2.connect(**self.db_details) as conn:
+                    with conn.cursor() as cur:
+                        if is_abzweigung:
+                            # Für Abzweigungen keine Verbundnummer, COUNT und STATUS laden
+                            cur.execute("""
+                                SELECT "TYP", "COUNT", "STATUS"
+                                FROM lwl."LWL_Leerrohr_Abzweigung"
+                                WHERE "id" = %s
+                            """, (leerrohr_id,))
+                            result = cur.fetchone()
+                            if result:
+                                typ_db, count_db, status_db = result
+                                count_db = int(count_db) if count_db is not None else 0
+                                status_db = int(status_db) if status_db is not None else 1
+                                print(f"DEBUG: Abzweigung - TYP: {typ_db}, COUNT: {count_db}, STATUS: {status_db}")
+                        else:
+                            # Für Leerrohre TYP, VERBUNDNUMMER, COUNT und STATUS laden
+                            cur.execute("""
+                                SELECT "TYP", "VERBUNDNUMMER", "COUNT", "STATUS"
+                                FROM lwl."LWL_Leerrohr"
+                                WHERE "id" = %s
+                            """, (leerrohr_id,))
+                            result = cur.fetchone()
+                            if result:
+                                typ_db, verbundnummer_db, count_db, status_db = result
+                                verbundnummer_db = str(verbundnummer_db) if verbundnummer_db is not None else "0"
+                                count_db = int(count_db) if count_db is not None else 0
+                                status_db = int(status_db) if status_db is not None else 1
+                                print(f"DEBUG: Leerrohr - Verbundnummer: {verbundnummer_db}, COUNT: {count_db}, STATUS: {status_db}")
 
-        if len(candidates) == 1:
-            # Nur eines: Direkt verarbeiten
-            nearest_feature = candidates[0]
-            self.process_selected_leerrohr(nearest_feature, is_abzweigung, layer)  # layer übergeben
-            # Optional: Ausprägung auch im ListWidget anzeigen (als einzelnes Item)
-            item_text = self.get_leerrohr_details_text(nearest_feature)
-            item = QListWidgetItem(item_text)
-            item.setData(Qt.UserRole, nearest_feature)  # Feature speichern (falls nötig)
-            self.ui.listWidget_Leerrohr.addItem(item)
+                                # Fülle comboBox_Verbundnummer
+                                self.ui.comboBox_Verbundnummer.clear()
+                                if typ_db == 3:
+                                    self.ui.comboBox_Verbundnummer.setEnabled(True)
+                                    cur.execute("""
+                                        SELECT DISTINCT "VERBUNDNUMMER"
+                                        FROM lwl."LWL_Leerrohr"
+                                        WHERE "TYP" = 3 AND "VKG_LR" = %s AND "VERBUNDNUMMER" IS NOT NULL AND "id" != %s
+                                    """, (self.selected_verteiler, leerrohr_id))
+                                    verwendete_nummern = {int(row[0]) for row in cur.fetchall() if row[0] is not None}
+                                    max_nummer = max(verwendete_nummern, default=0)
+                                    for nummer in range(1, max_nummer + 11):
+                                        self.ui.comboBox_Verbundnummer.addItem(str(nummer))
+                                        if nummer in verwendete_nummern:
+                                            index = self.ui.comboBox_Verbundnummer.count() - 1
+                                            self.ui.comboBox_Verbundnummer.model().item(index).setEnabled(False)
+                                    self.ui.comboBox_Verbundnummer.setCurrentText(verbundnummer_db)
+                                    print(f"DEBUG: Verbundnummer für Multirohr gesetzt: {verbundnummer_db}")
+                                else:
+                                    self.ui.comboBox_Verbundnummer.addItem("Deaktiviert")
+                                    self.ui.comboBox_Verbundnummer.setCurrentText("Deaktiviert")
+                                    self.ui.comboBox_Verbundnummer.setEnabled(False)
+                                    print(f"DEBUG: Verbundnummer für Nicht-Multirohr auf 'Deaktiviert' gesetzt")
+
+                        # Fülle comboBox_Countwert
+                        self.ui.comboBox_Countwert.clear()
+                        for count_value in range(16):
+                            self.ui.comboBox_Countwert.addItem(str(count_value))
+                        self.ui.comboBox_Countwert.setCurrentText(str(count_db))
+                        self.ui.comboBox_Countwert.setEnabled(True)
+                        print(f"DEBUG: COUNT-Wert gesetzt: {count_db}")
+
+                        # Fülle comboBox_Status
+                        self.populate_status(status_db)
+            except Exception as e:
+                print(f"DEBUG: Fehler beim Laden der Verbundnummer, COUNT oder STATUS aus Datenbank: {e}")
+                self.ui.comboBox_Verbundnummer.clear()
+                self.ui.comboBox_Verbundnummer.addItem("Deaktiviert")
+                self.ui.comboBox_Verbundnummer.setCurrentText("Deaktiviert")
+                self.ui.comboBox_Verbundnummer.setEnabled(False)
+                self.ui.comboBox_Countwert.clear()
+                for count_value in range(16):
+                    self.ui.comboBox_Countwert.addItem(str(count_value))
+                self.ui.comboBox_Countwert.setCurrentText("0")
+                self.ui.comboBox_Countwert.setEnabled(True)
+                self.populate_status(1)
+
+            self.ui.checkBox_Foerderung.setChecked(self.selected_leerrohr["GEFOERDERT"] or False)
+            self.ui.checkBox_Subduct.setChecked(self.selected_leerrohr["SUBDUCT"] or False)
+            self.ui.label_Kommentar.setText(self.selected_leerrohr["KOMMENTAR"] or "")
+            self.ui.label_Kommentar_2.setText(self.selected_leerrohr["BESCHREIBUNG"] or "")
+            try:
+                if self.selected_leerrohr["VERLEGT_AM"]:
+                    if isinstance(self.selected_leerrohr["VERLEGT_AM"], QDate):
+                        self.ui.mDateTimeEdit_Strecke.setDate(self.selected_leerrohr["VERLEGT_AM"])
+                    else:
+                        self.ui.mDateTimeEdit_Strecke.setDate(QDate.fromString(str(self.selected_leerrohr["VERLEGT_AM"]), "yyyy-MM-dd"))
+                else:
+                    self.ui.mDateTimeEdit_Strecke.setDate(QDate.currentDate())
+            except Exception as e:
+                print(f"DEBUG: Fehler beim Setzen des Datums für VERLEGT_AM: {e}")
+                self.ui.mDateTimeEdit_Strecke.setDate(QDate.currentDate())
+
+            # Subtyp in ListWidgets auswählen und auf SingleSelection setzen
+            for list_widget in [self.ui.listWidget_Zubringerrohr, self.ui.listWidget_Hauptrohr, self.ui.listWidget_Multirohr]:
+                list_widget.setSelectionMode(QAbstractItemView.SingleSelection)
+                for i in range(list_widget.count()):
+                    item = list_widget.item(i)
+                    item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+                    if item.text().startswith(f"{self.selected_leerrohr['SUBTYP']} -"):
+                        item.setSelected(True)
+                    else:
+                        item.setSelected(False)
+            print(f"DEBUG: Subtyp {self.selected_leerrohr['SUBTYP']} ausgewählt, SingleSelection aktiviert")
+            self.update_selected_leerrohr_subtyp()
+
+            # Knoten hervorheben
+            knoten_layer = QgsProject.instance().mapLayersByName("LWL_Knoten")[0]
+            for feature in knoten_layer.getFeatures(QgsFeatureRequest().setFilterExpression(f'"id" = {self.selected_verteiler}')):
+                if self.verteiler_highlight_1:
+                    self.verteiler_highlight_1.hide()
+                self.verteiler_highlight_1 = QgsHighlight(self.iface.mapCanvas(), feature.geometry(), knoten_layer)
+                self.verteiler_highlight_1.setColor(Qt.red)
+                self.verteiler_highlight_1.setWidth(5)
+                self.verteiler_highlight_1.show()
+            for feature in knoten_layer.getFeatures(QgsFeatureRequest().setFilterExpression(f'"id" = {self.selected_verteiler_2}')):
+                if self.verteiler_highlight_2:
+                    self.verteiler_highlight_2.hide()
+                self.verteiler_highlight_2 = QgsHighlight(self.iface.mapCanvas(), feature.geometry(), knoten_layer)
+                self.verteiler_highlight_2.setColor(Qt.red)
+                self.verteiler_highlight_2.setWidth(5)
+                self.verteiler_highlight_2.show()
+
+            # Leerrohr/Abzweigung hervorheben
+            print(f"DEBUG: Geometrie: {nearest_feature.geometry().asWkt()}")
+            if self.leerrohr_highlight:
+                self.leerrohr_highlight.hide()
+            self.leerrohr_highlight = QgsHighlight(self.iface.mapCanvas(), nearest_feature.geometry(), layer)
+            self.leerrohr_highlight.setColor(QColor(255, 0, 0, 150))
+            self.leerrohr_highlight.setWidth(10)
+            self.leerrohr_highlight.show()
+
+            QgsMessageLog.logMessage(f"{'Abzweigung' if is_abzweigung else 'Leerrohr'} gewählt: {leerrohr_id}", "Leerrohr-Tool", level=Qgis.Info)
+            self.ui.pushButton_update_leerrohr.setEnabled(False)
         else:
-            # Mehrere: Liste befüllen, Hinweis im Label
-            for feature in candidates:
-                item_text = self.get_leerrohr_details_text(feature)
-                item = QListWidgetItem(item_text)
-                item.setData(Qt.UserRole, feature)  # Feature für Handler speichern
-                self.ui.listWidget_Leerrohr.addItem(item)
-            self.ui.label_gewaehltes_leerrohr.setText("Bitte in der Liste das korrekte Leerrohr wählen")
-            self.ui.label_gewaehltes_leerrohr.setStyleSheet("background-color: yellow;")  # Signalisiere Auswahl
+            self.ui.label_gewaehltes_leerrohr.setText(f"Kein {'Abzweigung' if is_abzweigung else 'Leerrohr'} in Reichweite gefunden")
+            self.ui.label_gewaehltes_leerrohr.setStyleSheet("background-color: gray;")
+            self.selected_leerrohr = None
+            self.ui.pushButton_update_leerrohr.setEnabled(False)
+            # Setze ListWidgets zurück auf MultiSelection
+            for list_widget in [self.ui.listWidget_Zubringerrohr, self.ui.listWidget_Hauptrohr, self.ui.listWidget_Multirohr]:
+                list_widget.setSelectionMode(QAbstractItemView.MultiSelection)
+                for i in range(list_widget.count()):
+                    item = list_widget.item(i)
+                    item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+                    item.setSelected(False)
 
         self.iface.mapCanvas().unsetMapTool(self.map_tool)
         self.map_tool = None
-
-    def process_selected_leerrohr(self, feature, is_abzweigung, layer):
-        """Verarbeitet ein ausgewähltes Leerrohr-Feature und updated UI-Elemente."""
-        import time
-        start_time = time.time()
-        leerrohr_id = feature.attribute("id")
-        fields = feature.fields()
-        if is_abzweigung:
-            self.selected_leerrohr = {
-                "id": leerrohr_id,
-                "ID_TRASSE": feature.attribute("ID_TRASSE"),
-                "VONKNOTEN": feature.attribute("VONKNOTEN"),
-                "NACHKNOTEN": feature.attribute("NACHKNOTEN"),
-                "TYP": feature.attribute("TYP"),
-                "SUBTYP": feature.attribute("SUBTYP"),
-                "CODIERUNG": feature.attribute("CODIERUNG"),
-                "VERBUNDNUMMER": None,
-                "GEFOERDERT": False,
-                "SUBDUCT": False,
-                "PARENT_LEERROHR_ID": feature.attribute("ID_PARENT_LEERROHR"),
-                "FIRMA_HERSTELLER": None,
-                "KOMMENTAR": None,
-                "BESCHREIBUNG": None,
-                "VERLEGT_AM": None,
-                "COUNT": feature.attribute("COUNT"),
-                "STATUS": feature.attribute("STATUS"),
-                "VKG_LR": feature.attribute("VKG_LR")
-            }
-            self.ui.label_gewaehltes_leerrohr.setText(f"Abzweigung ID: {leerrohr_id} (ausgewählt)")
-        else:
-            self.selected_leerrohr = {
-                "id": leerrohr_id,
-                "ID_TRASSE": feature.attribute("ID_TRASSE"),
-                "VONKNOTEN": feature.attribute("VONKNOTEN"),
-                "NACHKNOTEN": feature.attribute("NACHKNOTEN"),
-                "TYP": feature.attribute("TYP"),
-                "SUBTYP": feature.attribute("SUBTYP"),
-                "CODIERUNG": feature.attribute("CODIERUNG"),
-                "VERBUNDNUMMER": feature.attribute("VERBUNDNUMMER"),
-                "GEFOERDERT": feature.attribute("GEFOERDERT") if fields.indexFromName("GEFOERDERT") != -1 else False,
-                "SUBDUCT": feature.attribute("SUBDUCT") if fields.indexFromName("SUBDUCT") != -1 else False,
-                "PARENT_LEERROHR_ID": feature.attribute("PARENT_LEERROHR_ID"),
-                "FIRMA_HERSTELLER": feature.attribute("FIRMA_HERSTELLER"),
-                "KOMMENTAR": feature.attribute("KOMMENTAR"),
-                "BESCHREIBUNG": feature.attribute("BESCHREIBUNG"),
-                "VERLEGT_AM": feature.attribute("VERLEGT_AM"),
-                "COUNT": feature.attribute("COUNT"),
-                "STATUS": feature.attribute("STATUS"),
-                "VKG_LR": feature.attribute("VKG_LR")
-            }
-            self.ui.label_gewaehltes_leerrohr.setText(f"Leerrohr ID: {leerrohr_id} (ausgewählt)")
-
-        self.selected_verteiler = feature.attribute("VONKNOTEN")
-        self.selected_verteiler_2 = feature.attribute("NACHKNOTEN")
-        self.ui.label_gewaehlter_verteiler.setText(f"Startknoten: {self.selected_verteiler}")
-        self.ui.label_gewaehlter_verteiler.setStyleSheet("background-color: lightgreen;")
-        self.ui.label_gewaehlter_verteiler_2.setText(f"Endknoten: {self.selected_verteiler_2}")
-        self.ui.label_gewaehltes_leerrohr.setStyleSheet("background-color: lightgreen;")
-        self.ui.label_gewaehlter_verteiler_2.setStyleSheet("background-color: lightgreen;")
-        print(f"DEBUG: Basis-Setup Zeit: {time.time() - start_time:.2f} Sekunden")
-
-        # Layer refresh
-        layer.dataProvider().reloadData()
-        print("DEBUG: Layer refreshed")
-
-        # DB-Abfragen
-        db_start = time.time()
-        count_db = feature.attribute("COUNT") or 0
-        status_db = feature.attribute("STATUS") or 1
-        verbundnummer_db = str(feature.attribute("VERBUNDNUMMER") or "0") if not is_abzweigung else None
-        typ_db = feature.attribute("TYP") or None
-        try:
-            print(f"DEBUG: DB-Abfrage für ID: {leerrohr_id}, Layer-COUNT: {count_db}")
-
-            if self.cur:
-                if is_abzweigung:
-                    self.cur.execute("""
-                        SELECT "TYP", "COUNT", "STATUS"
-                        FROM lwl."LWL_Leerrohr_Abzweigung"
-                        WHERE "id" = %s
-                    """, (leerrohr_id,))
-                    result = self.cur.fetchone()
-                    if result:
-                        typ_db, count_db_temp, status_db = result
-                        count_db = int(count_db_temp or count_db)
-                        status_db = int(status_db or status_db)
-                        print(f"DEBUG: DB Abzweigung - COUNT: {count_db}")
-                else:
-                    self.cur.execute("""
-                        SELECT "TYP", "VERBUNDNUMMER", "COUNT", "STATUS"
-                        FROM lwl."LWL_Leerrohr"
-                        WHERE "id" = %s
-                    """, (leerrohr_id,))
-                    result = self.cur.fetchone()
-                    if result:
-                        typ_db, verbundnummer_db_temp, count_db_temp, status_db = result
-                        verbundnummer_db = str(verbundnummer_db_temp or verbundnummer_db)
-                        count_db = int(count_db_temp or count_db)
-                        status_db = int(status_db or status_db)
-                        print(f"DEBUG: DB Leerrohr - COUNT: {count_db}, Verbund: {verbundnummer_db}")
-        except Exception as e:
-            print(f"DEBUG: DB-Error: {e} – Verwende Layer-Fallback")
-
-        # ComboBox-Ver bundnummer
-        self.ui.comboBox_Verbundnummer.clear()
-        if not is_abzweigung and typ_db == 3:
-            self.ui.comboBox_Verbundnummer.setEnabled(True)
-            # Dein Füll-Code für verwendete_nummern
-            self.ui.comboBox_Verbundnummer.setCurrentText(verbundnummer_db)
-        else:
-            self.ui.comboBox_Verbundnummer.addItem("Deaktiviert")
-            self.ui.comboBox_Verbundnummer.setCurrentText("Deaktiviert")
-            self.ui.comboBox_Verbundnummer.setEnabled(False)
-
-        # ComboBox-Count
-        self.ui.comboBox_Countwert.clear()
-        for count_value in range(16):
-            self.ui.comboBox_Countwert.addItem(str(count_value))
-        self.ui.comboBox_Countwert.setCurrentText(str(count_db))
-        self.ui.comboBox_Countwert.setEnabled(True)
-        print(f"DEBUG: COUNT gesetzt: {count_db}")
-
-        # Status
-        self.populate_status(status_db)
-
-        print(f"DEBUG: DB-Zeit: {time.time() - db_start:.2f} Sekunden")
-
-        # UI-Updates
-        self.ui.checkBox_Foerderung.setChecked(self.selected_leerrohr.get("GEFOERDERT", False))
-        self.ui.checkBox_Subduct.setChecked(self.selected_leerrohr.get("SUBDUCT", False))
-        self.ui.label_Kommentar.setText(self.selected_leerrohr.get("KOMMENTAR", "") or "")
-        self.ui.label_Kommentar_2.setText(self.selected_leerrohr.get("BESCHREIBUNG", "") or "")
-        try:
-            verlegt_am = self.selected_leerrohr.get("VERLEGT_AM")
-            if verlegt_am:
-                if isinstance(verlegt_am, QDate):
-                    self.ui.mDateTimeEdit_Strecke.setDate(verlegt_am)
-                else:
-                    self.ui.mDateTimeEdit_Strecke.setDate(QDate.fromString(str(verlegt_am), "yyyy-MM-dd"))
-            else:
-                self.ui.mDateTimeEdit_Strecke.setDate(QDate.currentDate())
-        except Exception as e:
-            print(f"DEBUG: Datum-Error: {e}")
-            self.ui.mDateTimeEdit_Strecke.setDate(QDate.currentDate())
-
-        # Subtyp-Auswahl
-        for list_widget in [self.ui.listWidget_Zubringerrohr, self.ui.listWidget_Hauptrohr, self.ui.listWidget_Multirohr]:
-            list_widget.setSelectionMode(QAbstractItemView.SingleSelection)
-            for i in range(list_widget.count()):
-                item = list_widget.item(i)
-                item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
-                if int(item.text().split(" - ")[0]) == self.selected_leerrohr["SUBTYP"]:
-                    item.setSelected(True)
-                else:
-                    item.setSelected(False)
-
-        # Subtyp-Anzeige
-        self.update_selected_leerrohr_subtyp()
-
-        # Highlights
-        layer.dataProvider().reloadData()
-        if self.leerrohr_highlight:
-            self.leerrohr_highlight.hide()
-        self.leerrohr_highlight = QgsHighlight(self.iface.mapCanvas(), feature.geometry(), layer)
-        self.leerrohr_highlight.setColor(Qt.magenta)
-        self.leerrohr_highlight.setWidth(5)
-        self.leerrohr_highlight.show()
-        self.iface.mapCanvas().redrawAllLayers()
-
-        # Knoten-Highlights
-        knot_layer = QgsProject.instance().mapLayersByName("LWL_Knoten")[0]
-        knot_layer.dataProvider().reloadData()
-        request_start = QgsFeatureRequest().setFilterExpression(f'"id" = {self.selected_verteiler}')
-        start_feature = next(knot_layer.getFeatures(request_start), None)
-        if start_feature:
-            if self.verteiler_highlight_1:
-                self.verteiler_highlight_1.hide()
-            self.verteiler_highlight_1 = QgsHighlight(self.iface.mapCanvas(), start_feature.geometry(), knot_layer)
-            self.verteiler_highlight_1.setColor(Qt.red)
-            self.verteiler_highlight_1.setWidth(5)
-            self.verteiler_highlight_1.show()
-
-        request_end = QgsFeatureRequest().setFilterExpression(f'"id" = {self.selected_verteiler_2}')
-        end_feature = next(knot_layer.getFeatures(request_end), None)
-        if end_feature:
-            if self.verteiler_highlight_2:
-                self.verteiler_highlight_2.hide()
-            self.verteiler_highlight_2 = QgsHighlight(self.iface.mapCanvas(), end_feature.geometry(), knot_layer)
-            self.verteiler_highlight_2.setColor(Qt.red)
-            self.verteiler_highlight_2.setWidth(5)
-            self.verteiler_highlight_2.show()
-
-        self.iface.mapCanvas().redrawAllLayers()
-
-        # KEIN Setzen von Update-Button hier – nur in pruefe_daten
-        self.ui.pushButton_update_leerrohr.setEnabled(False)
-        self.ui.pushButton_Import.setEnabled(False)
-        print("DEBUG: Buttons deaktiviert – Update nur nach Prüfung")
-
-    def get_leerrohr_details_text(self, feature):
-        """Erzeugt den Text für das ListWidget-Item aus dem Feature."""
-        fields = feature.fields()
-        leerrohr_id = feature.attribute("id") or "N/A"
-        typ = feature.attribute("TYP") or "N/A"
-        subtyp = feature.attribute("SUBTYP") or "N/A"
-        codierung = feature.attribute("CODIERUNG") or "N/A"
-        verbundnummer = feature.attribute("VERBUNDNUMMER") if fields.indexFromName("VERBUNDNUMMER") != -1 else "N/A"
-        count = feature.attribute("COUNT") or "N/A"
-        status = feature.attribute("STATUS") or "N/A"
-        return f"ID: {leerrohr_id} - TYP: {typ} - SUBTYP: {subtyp} - Code: {codierung} - V: {verbundnummer} - COUNT: {count} - STATUS: {status}"
-    
+        
     def populate_status(self, current_status_id=None):
         """Füllt das comboBox_Status mit Werten aus LUT_Status und setzt den aktuellen Status."""
         print("DEBUG: Starte populate_status")
@@ -1784,17 +1689,15 @@ class LeerrohrVerlegenTool(QDialog):
         self.map_tool = None
 
     def update_selected_leerrohr_subtyp(self):
-        """Aktualisiert die grafische Anzeige der ausgewählten Leerrohr-Subtypen im graphicsView_Auswahl_Subtyp."""
+        """Aktualisiert die Anzeige der ausgewählten Subtypen im GraphicsView."""
         print("DEBUG: Starte update_selected_leerrohr_subtyp")
         scene = QGraphicsScene()
-        self.ui.graphicsView_Auswahl_Subtyp.setScene(scene)
-        self.ui.graphicsView_Auswahl_Subtyp.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.ui.graphicsView_Auswahl_Subtyp.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         y_offset = 0
+        x_offset = 0
         font = QFont("Arial", 12, QFont.Bold)
-        selected_subtyp_ids = []
-        belegte_rohre = set()
 
+        # Sammle ausgewählte Subtyp-IDs
+        selected_subtyp_ids = []
         for list_widget in [self.ui.listWidget_Zubringerrohr, self.ui.listWidget_Hauptrohr, self.ui.listWidget_Multirohr]:
             for item in list_widget.selectedItems():
                 try:
@@ -1803,241 +1706,78 @@ class LeerrohrVerlegenTool(QDialog):
                 except ValueError:
                     continue
 
-        if self.ui.radioButton_Abzweigung.isChecked() and self.selected_parent_leerrohr:
-            # Übernommene Parent-Anzeige aus Sicherung (einfach, ohne belegte Rohre für Parent)
-            parent_subtyp_id = self.selected_parent_leerrohr["SUBTYP"]
-            parent_rohre, parent_subtyp_char, parent_typ = self.parse_rohr_definition(parent_subtyp_id)  # Hole parent_typ hinzu
-            if parent_rohre and parent_subtyp_char:
-                parent_label = scene.addText(f"{parent_subtyp_char} (Parent):")
-                parent_label.setPos(0, y_offset)
-                parent_label.setDefaultTextColor(Qt.red)  # Rot für Parent-Beschriftung
-                parent_label.setFont(font)
-                parent_label.setZValue(1)
-                scene.addItem(parent_label)
-                y_offset += parent_label.boundingRect().height() + 5
-                x_offset = 0
+        if not selected_subtyp_ids:
+            self.ui.label_Status.setText("Kein Subtyp ausgewählt.")
+            self.ui.label_Status.setStyleSheet("background-color: lightcoral;")
+            return
 
-                font.setPointSize(10)
-                unique_durchmesser = set(durchmesser for _, _, durchmesser, _, _, _ in parent_rohre)
-                is_mixed = len(unique_durchmesser) > 1
-                max_durchmesser = max(unique_durchmesser) if unique_durchmesser else 0
-                square_size = {1: 30, 2: 25, 3: 20}.get(parent_typ, 20)  # Gleich wie beim Subtyp, basierend auf parent_typ
-                for rohr_id, rohr_nummer, durchmesser, farbe, primary_farbcode, secondary_farbcode in parent_rohre:
-                    add_adjust = 5 if is_mixed and durchmesser == max_durchmesser else 0
-                    size = square_size + add_adjust
-                    x = x_offset
-                    y = y_offset + (square_size - size) / 2
+        # Prüfe auf Update-Modus oder Abzweigungsmodus für Parent-Leerrohr
+        parent_subtyp_id = None
+        belegte_rohre = set()
+        if self.selected_parent_leerrohr or self.selected_leerrohr:
+            if self.selected_parent_leerrohr:
+                parent_subtyp_id = self.selected_parent_leerrohr.get("SUBTYP")
+                parent_id = self.selected_parent_leerrohr["id"]
+                table = "LWL_Leerrohr"
+            elif self.selected_leerrohr:
+                parent_subtyp_id = self.selected_leerrohr.get("SUBTYP")
+                parent_id = self.selected_leerrohr["id"]
+                table = "LWL_Leerrohr_Abzweigung" if self.ui.radioButton_Abzweigung.isChecked() else "LWL_Leerrohr"
+            if parent_subtyp_id:
+                try:
+                    with psycopg2.connect(**self.db_details) as conn:
+                        with conn.cursor() as cur:
+                            cur.execute(f"""
+                                SELECT "ID_TYP" FROM lwl."LUT_Leerrohr_SubTyp" WHERE "id" = %s
+                            """, (parent_subtyp_id,))
+                            parent_typ = cur.fetchone()[0] if cur.rowcount > 0 else 3
+                    parent_rohre, parent_subtyp_char, _ = self.parse_rohr_definition(parent_subtyp_id)
+                    square_size = {1: 30, 2: 25, 3: 20}.get(parent_typ, 20)
+                    if self.selected_leerrohr:
+                        cur.execute(f"""
+                            SELECT "BELEGT_DURCH_ABZWEIGUNGEN" FROM lwl."{table}" WHERE "id" = %s
+                        """, (parent_id,))
+                        belegte_rohre_result = cur.fetchone()
+                        if belegte_rohre_result:
+                            belegte_rohre = set(belegte_rohre_result[0] or [])
+                    if parent_rohre and parent_subtyp_char:
+                        parent_label = scene.addText(f"{parent_subtyp_char} (Parent):")
+                        parent_label.setPos(x_offset, y_offset)
+                        parent_label.setDefaultTextColor(Qt.black)
+                        parent_label.setFont(font)
+                        parent_label.setZValue(1)
+                        scene.addItem(parent_label)
+                        y_offset += parent_label.boundingRect().height() + 5
+                        x_offset = 0
 
-                    rect = QGraphicsRectItem(x, y, size, size)
-                    rect.setPen(QPen(Qt.black, 1))
-                    scene.addItem(rect)
+                        font.setPointSize(10)
+                        unique_durchmesser = set(durchmesser for _, _, durchmesser, _, _, _ in parent_rohre)
+                        is_mixed = len(unique_durchmesser) > 1
+                        max_durchmesser = max(unique_durchmesser) if unique_durchmesser else 0
+                        for rohr_id, rohr_nummer, durchmesser, farbe, primary_farbcode, secondary_farbcode in parent_rohre:
+                            add_adjust = 5 if is_mixed and durchmesser == max_durchmesser else 0
+                            size = square_size + add_adjust
+                            x = x_offset
+                            y = y_offset + (square_size - size) / 2
 
-                    triangle1_points = [
-                        QPointF(x, y),
-                        QPointF(x + size, y),
-                        QPointF(x, y + size)
-                    ]
-                    triangle2_points = [
-                        QPointF(x + size, y),
-                        QPointF(x + size, y + size),
-                        QPointF(x, y + size)
-                    ]
+                            rect = QGraphicsRectItem(x, y, size, size)
+                            rect.setPen(QPen(Qt.black, 1))
+                            scene.addItem(rect)
 
-                    triangle1 = QGraphicsPolygonItem(QPolygonF(triangle1_points), rect)
-                    triangle2 = QGraphicsPolygonItem(QPolygonF(triangle2_points), rect)
+                            triangle1_points = [
+                                QPointF(x, y),
+                                QPointF(x + size, y),
+                                QPointF(x, y + size)
+                            ]
+                            triangle2_points = [
+                                QPointF(x + size, y),
+                                QPointF(x + size, y + size),
+                                QPointF(x, y + size)
+                            ]
 
-                    if secondary_farbcode:
-                        color1 = QColor(primary_farbcode)
-                        color2 = QColor(secondary_farbcode)
-                        triangle1.setBrush(QBrush(color1))
-                        triangle2.setBrush(QBrush(color2))
-                    else:
-                        color = QColor(primary_farbcode)
-                        triangle1.setBrush(QBrush(color))
-                        triangle2.setBrush(QBrush(color))
+                            triangle1 = QGraphicsPolygonItem(QPolygonF(triangle1_points), rect)
+                            triangle2 = QGraphicsPolygonItem(QPolygonF(triangle2_points), rect)
 
-                    triangle1.setPen(QPen(Qt.NoPen))
-                    triangle2.setPen(QPen(Qt.NoPen))
-                    triangle1.setZValue(0)
-                    triangle2.setZValue(0)
-
-                    text = scene.addText(str(rohr_nummer))
-                    text_center_x = x + size / 2 - text.boundingRect().width() / 2
-                    text_center_y = y + size / 2 - text.boundingRect().height() / 2
-                    text.setPos(text_center_x, text_center_y)
-                    color = QColor(primary_farbcode)
-                    brightness = (color.red() * 0.299 + color.green() * 0.587 + color.blue() * 0.114)
-                    text.setDefaultTextColor(Qt.black if brightness > 128 else Qt.white)
-                    text.setFont(font)
-                    text.setZValue(3)
-                    scene.addItem(text)
-
-                    x_offset += size + 1
-
-                y_offset += square_size + 5
-            else:
-                print(f"DEBUG: Keine Rohre oder SUBTYP_char für Parent-Subtyp {parent_subtyp_id} gefunden")
-                self.ui.label_Status.setText(f"Keine Daten für Parent-Leerrohr Subtyp {parent_subtyp_id} gefunden.")
-                self.ui.label_Status.setStyleSheet("background-color: lightcoral;")
-
-        # Subtyp-Anzeige: Unterscheide Modi, um Beschriftung für Abzweigungen wie in Sicherung zu halten
-        if self.ui.radioButton_Abzweigung.isChecked() or self.selected_leerrohr:
-            # Übernommene Logik aus Sicherung: Einfache Beschriftung ohne Duplikate/Quantities/Button
-            for subtyp_id in selected_subtyp_ids:
-                rohre, subtyp_char, typ = self.parse_rohr_definition(subtyp_id)
-                if not rohre or subtyp_char is None:
-                    self.ui.label_Status.setText(f"Keine Rohre oder SUBTYP_char für Subtyp {subtyp_id} gefunden.")
-                    self.ui.label_Status.setStyleSheet("background-color: lightcoral;")
-                    continue
-
-                square_size = {1: 30, 2: 25, 3: 20}.get(typ, 20)
-                x_offset = 0
-                subtyp_text = scene.addText(f"{subtyp_char}:")
-                subtyp_text.setPos(x_offset, y_offset)
-                subtyp_text.setDefaultTextColor(Qt.black)
-                subtyp_text.setFont(font)
-                subtyp_text.setZValue(1)
-                scene.addItem(subtyp_text)
-                y_offset += subtyp_text.boundingRect().height() + 5
-                x_offset = 0
-
-                font.setPointSize(10)
-                unique_durchmesser = set(durchmesser for _, _, durchmesser, _, _, _ in rohre)
-                is_mixed = len(unique_durchmesser) > 1
-                max_durchmesser = max(unique_durchmesser) if unique_durchmesser else 0
-                for rohr_id, rohr_nummer, durchmesser, farbe, primary_farbcode, secondary_farbcode in rohre:
-                    ist_belegt = rohr_nummer in belegte_rohre and self.selected_leerrohr
-                    add_adjust = 5 if is_mixed and durchmesser == max_durchmesser else 0
-                    size = square_size + add_adjust
-                    x = x_offset
-                    y = y_offset + (square_size - size) / 2
-
-                    rect = QGraphicsRectItem(x, y, size, size)
-                    rect.setPen(QPen(Qt.red if ist_belegt else Qt.black, 2 if ist_belegt else 1))
-                    if ist_belegt:
-                        rect.setToolTip(f"Rohrnummer {rohr_nummer} bereits belegt")
-
-                    triangle1_points = [
-                        QPointF(x, y),
-                        QPointF(x + size, y),
-                        QPointF(x, y + size)
-                    ]
-                    triangle2_points = [
-                        QPointF(x + size, y),
-                        QPointF(x + size, y + size),
-                        QPointF(x, y + size)
-                    ]
-
-                    triangle1 = QGraphicsPolygonItem(QPolygonF(triangle1_points), rect)
-                    triangle2 = QGraphicsPolygonItem(QPolygonF(triangle2_points), rect)
-
-                    if ist_belegt:
-                        color = QColor("#808080")
-                        triangle1.setBrush(QBrush(color))
-                        triangle2.setBrush(QBrush(color))
-                    else:
-                        if secondary_farbcode:
-                            color1 = QColor(primary_farbcode)
-                            color2 = QColor(secondary_farbcode)
-                            triangle1.setBrush(QBrush(color1))
-                            triangle2.setBrush(QBrush(color2))
-                        else:
-                            color = QColor(primary_farbcode)
-                            triangle1.setBrush(QBrush(color))
-                            triangle2.setBrush(QBrush(color))
-
-                    triangle1.setPen(QPen(Qt.NoPen))
-                    triangle2.setPen(QPen(Qt.NoPen))
-                    triangle1.setZValue(0)
-                    triangle2.setZValue(0)
-                    scene.addItem(rect)
-
-                    if ist_belegt:
-                        line1 = QGraphicsLineItem(x, y, x + size, y + size, rect)
-                        line1.setPen(QPen(Qt.red, 2))
-                        line1.setZValue(2)
-                        scene.addItem(line1)
-                        line2 = QGraphicsLineItem(x + size, y, x, y + size, rect)
-                        line2.setPen(QPen(Qt.red, 2))
-                        line2.setZValue(2)
-                        scene.addItem(line2)
-
-                    text = scene.addText(str(rohr_nummer))
-                    text_center_x = x + size / 2 - text.boundingRect().width() / 2
-                    text_center_y = y + size / 2 - text.boundingRect().height() / 2
-                    text.setPos(text_center_x, text_center_y)
-                    color = QColor("#808080" if ist_belegt else primary_farbcode)
-                    brightness = (color.red() * 0.299 + color.green() * 0.587 + color.blue() * 0.114)
-                    text.setDefaultTextColor(Qt.black if brightness > 128 else Qt.white)
-                    text.setFont(font)
-                    text.setZValue(3)
-                    scene.addItem(text)
-
-                    x_offset += size + 1
-
-                y_offset += square_size + 5
-        else:
-            # Behalte neue Logik für Hauptstrang-Import: Mit Quantities und Duplizieren-Button
-            for subtyp_id in selected_subtyp_ids:
-                rohre, subtyp_char, typ = self.parse_rohr_definition(subtyp_id)
-                if not rohre or subtyp_char is None:
-                    self.ui.label_Status.setText(f"Keine Rohre oder SUBTYP_char für Subtyp {subtyp_id} gefunden.")
-                    self.ui.label_Status.setStyleSheet("background-color: lightcoral;")
-                    continue
-
-                quantity = self.subtyp_quantities.get(subtyp_id, 1)
-                print(f"DEBUG: Anzeige Subtyp {subtyp_id} mit Quantity: {quantity}")
-
-                square_size = {1: 30, 2: 25, 3: 20}.get(typ, 20)
-                for q in range(quantity):
-                    x_offset = 0
-                    if q == 0:
-                        subtyp_text = scene.addText(f"{subtyp_char}:")
-                    else:
-                        subtyp_text = scene.addText(f" (Duplikat {q+1}):")
-                    subtyp_text.setPos(x_offset, y_offset)
-                    subtyp_text.setDefaultTextColor(Qt.black)
-                    subtyp_text.setFont(font)
-                    subtyp_text.setZValue(1)
-                    scene.addItem(subtyp_text)
-                    y_offset += subtyp_text.boundingRect().height() + 5
-                    x_offset = 0
-
-                    font.setPointSize(10)
-                    unique_durchmesser = set(durchmesser for _, _, durchmesser, _, _, _ in rohre)
-                    is_mixed = len(unique_durchmesser) > 1
-                    max_durchmesser = max(unique_durchmesser) if unique_durchmesser else 0
-                    for rohr_id, rohr_nummer, durchmesser, farbe, primary_farbcode, secondary_farbcode in rohre:
-                        ist_belegt = rohr_nummer in belegte_rohre and self.selected_leerrohr
-                        add_adjust = 5 if is_mixed and durchmesser == max_durchmesser else 0
-                        size = square_size + add_adjust
-                        x = x_offset
-                        y = y_offset + (square_size - size) / 2
-
-                        rect = QGraphicsRectItem(x, y, size, size)
-                        rect.setPen(QPen(Qt.red if ist_belegt else Qt.black, 2 if ist_belegt else 1))
-                        if ist_belegt:
-                            rect.setToolTip(f"Rohrnummer {rohr_nummer} bereits belegt")
-
-                        triangle1_points = [
-                            QPointF(x, y),
-                            QPointF(x + size, y),
-                            QPointF(x, y + size)
-                        ]
-                        triangle2_points = [
-                            QPointF(x + size, y),
-                            QPointF(x + size, y + size),
-                            QPointF(x, y + size)
-                        ]
-
-                        triangle1 = QGraphicsPolygonItem(QPolygonF(triangle1_points), rect)
-                        triangle2 = QGraphicsPolygonItem(QPolygonF(triangle2_points), rect)
-
-                        if ist_belegt:
-                            color = QColor("#808080")
-                            triangle1.setBrush(QBrush(color))
-                            triangle2.setBrush(QBrush(color))
-                        else:
                             if secondary_farbcode:
                                 color1 = QColor(primary_farbcode)
                                 color2 = QColor(secondary_farbcode)
@@ -2048,46 +1788,134 @@ class LeerrohrVerlegenTool(QDialog):
                                 triangle1.setBrush(QBrush(color))
                                 triangle2.setBrush(QBrush(color))
 
-                        triangle1.setPen(QPen(Qt.NoPen))
-                        triangle2.setPen(QPen(Qt.NoPen))
-                        triangle1.setZValue(0)
-                        triangle2.setZValue(0)
-                        scene.addItem(rect)
+                            triangle1.setPen(QPen(Qt.NoPen))
+                            triangle2.setPen(QPen(Qt.NoPen))
+                            triangle1.setZValue(0)
+                            triangle2.setZValue(0)
 
-                        if ist_belegt:
-                            line1 = QGraphicsLineItem(x, y, x + size, y + size, rect)
-                            line1.setPen(QPen(Qt.red, 2))
-                            line1.setZValue(2)
-                            scene.addItem(line1)
-                            line2 = QGraphicsLineItem(x + size, y, x, y + size, rect)
-                            line2.setPen(QPen(Qt.red, 2))
-                            line2.setZValue(2)
-                            scene.addItem(line2)
+                            text = scene.addText(str(rohr_nummer))
+                            text_center_x = x + size / 2 - text.boundingRect().width() / 2
+                            text_center_y = y + size / 2 - text.boundingRect().height() / 2
+                            text.setPos(text_center_x, text_center_y)
+                            color = QColor(primary_farbcode)
+                            brightness = (color.red() * 0.299 + color.green() * 0.587 + color.blue() * 0.114)
+                            text.setDefaultTextColor(Qt.black if brightness > 128 else Qt.white)
+                            text.setFont(font)
+                            text.setZValue(3)
+                            scene.addItem(text)
 
-                        text = scene.addText(str(rohr_nummer))
-                        text_center_x = x + size / 2 - text.boundingRect().width() / 2
-                        text_center_y = y + size / 2 - text.boundingRect().height() / 2
-                        text.setPos(text_center_x, text_center_y)
-                        color = QColor("#808080" if ist_belegt else primary_farbcode)
-                        brightness = (color.red() * 0.299 + color.green() * 0.587 + color.blue() * 0.114)
-                        text.setDefaultTextColor(Qt.black if brightness > 128 else Qt.white)
-                        text.setFont(font)
-                        text.setZValue(3)
-                        scene.addItem(text)
+                            x_offset += size + 1
 
-                        x_offset += size + 1
+                        y_offset += square_size + 5
+                    else:
+                        print(f"DEBUG: Keine Rohre oder SUBTYP_char für Parent-Subtyp {parent_subtyp_id} gefunden")
+                        self.ui.label_Status.setText(f"Keine Daten für Parent-Leerrohr Subtyp {parent_subtyp_id} gefunden.")
+                        self.ui.label_Status.setStyleSheet("background-color: lightcoral;")
+                except Exception as e:
+                    print(f"DEBUG: Fehler beim Laden des Parent-Leerrohr-Subtyps: {e}")
+                    self.ui.label_Status.setText(f"Fehler beim Laden des Parent-Leerrohrs: {e}")
+                    self.ui.label_Status.setStyleSheet("background-color: lightcoral;")
 
-                    y_offset += square_size + 5
+        # Zeichne den ausgewählten Subtyp (nur einer im Abzweigungs- oder Update-Modus)
+        for subtyp_id in selected_subtyp_ids:
+            rohre, subtyp_char, typ = self.parse_rohr_definition(subtyp_id)
+            if not rohre or subtyp_char is None:
+                self.ui.label_Status.setText(f"Keine Rohre oder SUBTYP_char für Subtyp {subtyp_id} gefunden.")
+                self.ui.label_Status.setStyleSheet("background-color: lightcoral;")
+                continue
 
-                # Nach allen Instanzen: Füge den Duplizieren-Button hinzu (nur im Hauptstrang-Modus)
-                if not (self.ui.radioButton_Abzweigung.isChecked() or self.selected_leerrohr):
-                    button = self.DuplicateButtonItem(subtyp_id, self)
-                    button.setPos(x_offset + 10, y_offset - square_size - 10)  # 10 px rechts vom letzten Kästchen
-                    scene.addItem(button)
-                    print(f"DEBUG: Duplizieren-Button für Subtyp {subtyp_id} hinzugefügt")
+            square_size = {1: 30, 2: 25, 3: 20}.get(typ, 20)
+            x_offset = 0
+            subtyp_text = scene.addText(f"{subtyp_char}:")
+            subtyp_text.setPos(x_offset, y_offset)
+            subtyp_text.setDefaultTextColor(Qt.black)
+            subtyp_text.setFont(font)
+            subtyp_text.setZValue(1)
+            scene.addItem(subtyp_text)
+            y_offset += subtyp_text.boundingRect().height() + 5
+            x_offset = 0
+
+            font.setPointSize(10)
+            unique_durchmesser = set(durchmesser for _, _, durchmesser, _, _, _ in rohre)
+            is_mixed = len(unique_durchmesser) > 1
+            max_durchmesser = max(unique_durchmesser) if unique_durchmesser else 0
+            for rohr_id, rohr_nummer, durchmesser, farbe, primary_farbcode, secondary_farbcode in rohre:
+                ist_belegt = rohr_nummer in belegte_rohre and self.selected_leerrohr
+                add_adjust = 5 if is_mixed and durchmesser == max_durchmesser else 0
+                size = square_size + add_adjust
+                x = x_offset
+                y = y_offset + (square_size - size) / 2
+
+                rect = QGraphicsRectItem(x, y, size, size)
+                rect.setPen(QPen(Qt.red if ist_belegt else Qt.black, 2 if ist_belegt else 1))
+                if ist_belegt:
+                    rect.setToolTip(f"Rohrnummer {rohr_nummer} bereits belegt")
+
+                triangle1_points = [
+                    QPointF(x, y),
+                    QPointF(x + size, y),
+                    QPointF(x, y + size)
+                ]
+                triangle2_points = [
+                    QPointF(x + size, y),
+                    QPointF(x + size, y + size),
+                    QPointF(x, y + size)
+                ]
+
+                triangle1 = QGraphicsPolygonItem(QPolygonF(triangle1_points), rect)
+                triangle2 = QGraphicsPolygonItem(QPolygonF(triangle2_points), rect)
+
+                if ist_belegt:
+                    color = QColor("#808080")
+                    triangle1.setBrush(QBrush(color))
+                    triangle2.setBrush(QBrush(color))
+                else:
+                    if secondary_farbcode:
+                        color1 = QColor(primary_farbcode)
+                        color2 = QColor(secondary_farbcode)
+                        triangle1.setBrush(QBrush(color1))
+                        triangle2.setBrush(QBrush(color2))
+                    else:
+                        color = QColor(primary_farbcode)
+                        triangle1.setBrush(QBrush(color))
+                        triangle2.setBrush(QBrush(color))
+
+                triangle1.setPen(QPen(Qt.NoPen))
+                triangle2.setPen(QPen(Qt.NoPen))
+                triangle1.setZValue(0)
+                triangle2.setZValue(0)
+                scene.addItem(rect)
+
+                if ist_belegt:
+                    line1 = QGraphicsLineItem(x, y, x + size, y + size, rect)
+                    line1.setPen(QPen(Qt.red, 2))
+                    line1.setZValue(2)
+                    scene.addItem(line1)
+                    line2 = QGraphicsLineItem(x + size, y, x, y + size, rect)
+                    line2.setPen(QPen(Qt.red, 2))
+                    line2.setZValue(2)
+                    scene.addItem(line2)
+
+                text = scene.addText(str(rohr_nummer))
+                text_center_x = x + size / 2 - text.boundingRect().width() / 2
+                text_center_y = y + size / 2 - text.boundingRect().height() / 2
+                text.setPos(text_center_x, text_center_y)
+                color = QColor("#808080" if ist_belegt else primary_farbcode)
+                brightness = (color.red() * 0.299 + color.green() * 0.587 + color.blue() * 0.114)
+                text.setDefaultTextColor(Qt.black if brightness > 128 else Qt.white)
+                text.setFont(font)
+                text.setZValue(3)
+                scene.addItem(text)
+
+                x_offset += size + 1
+
+            y_offset += square_size + 5
 
         # Dynamische Anpassung der SceneRect für Scrollbarkeit
         scene.setSceneRect(0, 0, 491, y_offset + 20)
+        self.ui.graphicsView_Auswahl_Subtyp.setScene(scene)
+        self.ui.graphicsView_Auswahl_Subtyp.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.ui.graphicsView_Auswahl_Subtyp.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.ui.label_Status.setText("Subtypen erfolgreich angezeigt.")
         self.ui.label_Status.setStyleSheet("background-color: lightgreen;")
         self.update_combobox_states()
@@ -2185,7 +2013,6 @@ class LeerrohrVerlegenTool(QDialog):
 
         selected_subtyp_ids = []
         is_multirohr = False
-        multirohr_quantities = 0
         for list_widget in [self.ui.listWidget_Zubringerrohr, self.ui.listWidget_Hauptrohr, self.ui.listWidget_Multirohr]:
             for item in list_widget.selectedItems():
                 try:
@@ -2194,8 +2021,6 @@ class LeerrohrVerlegenTool(QDialog):
                     selected_subtyp_ids.append((subtyp_id, typ))
                     if typ == 3:
                         is_multirohr = True
-                        quantity = self.subtyp_quantities.get(subtyp_id, 1)
-                        multirohr_quantities += quantity  # Summe für Prüfung
                 except ValueError:
                     continue
 
@@ -2291,11 +2116,6 @@ class LeerrohrVerlegenTool(QDialog):
                         vorhandene_verbundnummern = {int(row[0]) for row in cur.fetchall() if row[0] is not None}
                         if verbundnummer and verbundnummer.isdigit() and int(verbundnummer) in vorhandene_verbundnummern:
                             fehler.append(f"Verbundnummer {verbundnummer} ist bereits vergeben.")
-                        # Neue Ergänzung: Prüfe, ob genug freie Verbundnummern für Duplikate vorhanden
-                        max_nummer = max(vorhandene_verbundnummern, default=0)
-                        freie_nummern_count = len([n for n in range(1, max_nummer + 11) if n not in vorhandene_verbundnummern])
-                        if multirohr_quantities > freie_nummern_count:
-                            fehler.append(f"Nicht genug freie Verbundnummern für {multirohr_quantities} Multirohr-Instanzen (verfügbar: {freie_nummern_count}).")
             except Exception as e:
                 fehler.append(f"Datenbankfehler bei der Verbundnummer-Prüfung: {e}")
 
@@ -2396,7 +2216,6 @@ class LeerrohrVerlegenTool(QDialog):
                 hilfsknoten_id = self.selected_verteiler
                 nach_knoten = self.selected_verteiler_2
                 for subtyp_id, typ, codierung, id_codierung in selected_subtyp_ids:
-                    # Im Abzweigungs-Modus: Quantity=1 (keine Duplizierung)
                     cur.execute(""" 
                         SELECT COUNT(*) FROM lwl."LWL_Leerrohr_Abzweigung" 
                         WHERE "ID_PARENT_LEERROHR" = %s AND "ID_HILFSKNOTEN" = %s AND "NACHKNOTEN" = %s
@@ -2406,7 +2225,7 @@ class LeerrohrVerlegenTool(QDialog):
                         raise Exception("Diese Abzweigung existiert bereits.")
                     insert_query = """
                         INSERT INTO lwl."LWL_Leerrohr_Abzweigung" (
-                            "ID_PARENT_LEERROHR", "ID_HILFSKNOTEN", "ID_TRASSE", "COUNT", "STATUS", 
+                            "ID_PARENT_LEERROHR", "ID_HILFSKNOTEN", "ID_TRASSE", "COUNT", "STATUS",
                             "VERFUEGBARE_ROHRE", "TYP", "CODIERUNG", "ID_CODIERUNG", "SUBTYP", "VKG_LR", "VONKNOTEN", "NACHKNOTEN"
                         ) VALUES (%s, %s, %s::bigint[], %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """
@@ -2418,25 +2237,7 @@ class LeerrohrVerlegenTool(QDialog):
                     print(f"DEBUG: Abzweigung eingefügt, Rows affected: {cur.rowcount}, COUNT: {count_value}, STATUS: {status}, ID_CODIERUNG: {id_codierung}")
             else:
                 print("DEBUG: Hauptstrang-Modus aktiviert")
-                # In importiere_daten (Hauptstrang-Modus)
-                id_trasse_jsonb = None
-                if self.selected_trasse_ids_flat:
-                    trasse_list = []
-                    num_trassen = len(self.selected_trasse_ids_flat)
-                    for i, tid in enumerate(self.selected_trasse_ids_flat):
-                        reverse = False  # Default: Vorwärts
-                        # Beispiel-Logik für Sackstich: Setze reverse=true für Rückwege (ab der Hälfte der Liste)
-                        # Passe das an deine echte Routing-Logik an (z. B. prüfe Knoten-Richtung oder Pfad-Richtung)
-                        if i >= num_trassen // 2:  # Einfaches Beispiel: Rückweg ab Mitte (für symmetrische Sackstiche)
-                            reverse = True
-                        trasse_list.append({
-                            "index": i + 1,
-                            "id": tid,
-                            "reverse": reverse
-                        })
-                    id_trasse_jsonb = json.dumps(trasse_list)
-                    print(f"DEBUG: Erweitertes ID_TRASSE_NEU mit reverse-Flag: {id_trasse_jsonb}")
-                trassen_ids_pg_array = "{" + ",".join(map(str, set(self.selected_trasse_ids_flat))) + "}" if self.selected_trasse_ids_flat else None
+                id_trasse_jsonb = json.dumps([{"index": i + 1, "id": tid} for i, tid in enumerate(self.selected_trasse_ids_flat)]) if self.selected_trasse_ids_flat else None
                 trassen_ids_pg_array = "{" + ",".join(map(str, set(self.selected_trasse_ids_flat))) + "}" if self.selected_trasse_ids_flat else None
                 status = status_id if status_id is not None else 1  # Nutze Dropdown oder Fallback
                 gefoerdert = self.ui.checkBox_Foerderung.isChecked()
@@ -2452,8 +2253,6 @@ class LeerrohrVerlegenTool(QDialog):
                 multirohr_count = sum(1 for _, typ, _, _ in selected_subtyp_ids if typ == 3)
                 current_verbundnummer = int(self.ui.comboBox_Verbundnummer.currentText()) if self.ui.comboBox_Verbundnummer.currentText().isdigit() else freie_nummern[0] if freie_nummern else 1
                 for i, (subtyp_id, typ, codierung, id_codierung) in enumerate(selected_subtyp_ids):
-                    quantity = self.subtyp_quantities.get(subtyp_id, 1)  # Default 1
-                    print(f"DEBUG: Importiere Subtyp {subtyp_id} {quantity}-mal")
                     cur.execute("""
                         SELECT SUM((rohr->>'anzahl')::int) AS rohr_anzahl
                         FROM lwl."LUT_Leerrohr_SubTyp" t,
@@ -2465,28 +2264,26 @@ class LeerrohrVerlegenTool(QDialog):
                     verfuegbare_rohre = (
                         "{" + ",".join(map(str, range(1, rohr_anzahl + 1))) + "}" if rohr_anzahl > 1 else None
                     )
-                    for q in range(quantity):
-                        # Für Hauptrohre (TYP=2) Verbundnummer auf 0 setzen
-                        verbundnummer_final = "0" if typ != 3 else str(current_verbundnummer)
-                        insert_query = """
-                            INSERT INTO lwl."LWL_Leerrohr" (
-                                "ID_TRASSE", "ID_TRASSE_NEU", "VERBUNDNUMMER", "VERFUEGBARE_ROHRE", "STATUS", "COUNT", "VKG_LR", 
-                                "GEFOERDERT", "SUBDUCT", "PARENT_LEERROHR_ID", "TYP", "CODIERUNG", "ID_CODIERUNG", "SUBTYP", 
-                                "FIRMA_HERSTELLER", "VONKNOTEN", "NACHKNOTEN", "KOMMENTAR", "BESCHREIBUNG", "VERLEGT_AM"
-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        """
-                        values = (
-                            trassen_ids_pg_array or '{}', id_trasse_jsonb or '{}', verbundnummer_final, verfuegbare_rohre, status, count_value, vonknoten,
-                            gefoerdert, subduct, parent_leerrohr_id, typ, codierung, id_codierung, subtyp_id,
-                            firma_hersteller, vonknoten, nachknoten, kommentar, beschreibung, verlegt_am
-                        )
-                        cur.execute(insert_query, values)
-                        print(f"DEBUG: Instanz {q+1}/{quantity} von Subtyp {subtyp_id} eingefügt, Rows affected: {cur.rowcount}, Verbundnummer: {verbundnummer_final}, COUNT: {count_value}, STATUS: {status}, ID_CODIERUNG: {id_codierung}")
-                        # Für nachfolgende Multirohre die nächste freie Verbundnummer wählen
-                        if typ == 3 and multirohr_count > 1:
-                            current_verbundnummer = next((n for n in freie_nummern if n > current_verbundnummer), current_verbundnummer + 1)
-                            freie_nummern = [n for n in freie_nummern if n != current_verbundnummer]  # Entferne genutzte
-                            print(f"DEBUG: Nächste Verbundnummer für Multirohr {i+1}: {current_verbundnummer}")
+                    # Für Hauptrohre (TYP=2) Verbundnummer auf 0 setzen
+                    verbundnummer_final = "0" if typ != 3 else str(current_verbundnummer)
+                    insert_query = """
+                        INSERT INTO lwl."LWL_Leerrohr" (
+                            "ID_TRASSE", "ID_TRASSE_NEU", "VERBUNDNUMMER", "VERFUEGBARE_ROHRE", "STATUS", "COUNT", "VKG_LR", 
+                            "GEFOERDERT", "SUBDUCT", "PARENT_LEERROHR_ID", "TYP", "CODIERUNG", "ID_CODIERUNG", "SUBTYP", 
+                            "FIRMA_HERSTELLER", "VONKNOTEN", "NACHKNOTEN", "KOMMENTAR", "BESCHREIBUNG", "VERLEGT_AM"
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """
+                    values = (
+                        trassen_ids_pg_array or '{}', id_trasse_jsonb or '{}', verbundnummer_final, verfuegbare_rohre, status, count_value, vonknoten,
+                        gefoerdert, subduct, parent_leerrohr_id, typ, codierung, id_codierung, subtyp_id,
+                        firma_hersteller, vonknoten, nachknoten, kommentar, beschreibung, verlegt_am
+                    )
+                    cur.execute(insert_query, values)
+                    print(f"DEBUG: Hauptstrang eingefügt, Rows affected: {cur.rowcount}, Verbundnummer: {verbundnummer_final}, COUNT: {count_value}, STATUS: {status}, ID_CODIERUNG: {id_codierung}")
+                    # Für nachfolgende Multirohre die nächste freie Verbundnummer wählen
+                    if typ == 3 and multirohr_count > 1:
+                        current_verbundnummer = next((n for n in freie_nummern if n > current_verbundnummer), current_verbundnummer + 1)
+                        print(f"DEBUG: Nächste Verbundnummer für Multirohr {i+1}: {current_verbundnummer}")
 
             conn.commit()
             print("DEBUG: Commit erfolgreich")
@@ -2548,23 +2345,7 @@ class LeerrohrVerlegenTool(QDialog):
             trassen_ids_pg_array = None
             geom_wkt = None
             if self.selected_trasse_ids_flat:
-                id_trasse_jsonb = None
-                if self.selected_trasse_ids_flat:
-                    trasse_list = []
-                    num_trassen = len(self.selected_trasse_ids_flat)
-                    for i, tid in enumerate(self.selected_trasse_ids_flat):
-                        reverse = False  # Default: Vorwärts
-                        # Beispiel-Logik für Sackstich: Setze reverse=true für Rückwege (ab der Hälfte der Liste)
-                        # Passe das an deine echte Routing-Logik an (z. B. prüfe Knoten-Richtung oder Pfad-Richtung)
-                        if i >= num_trassen // 2:  # Einfaches Beispiel: Rückweg ab Mitte (für symmetrische Sackstiche)
-                            reverse = True
-                        trasse_list.append({
-                            "index": i + 1,
-                            "id": tid,
-                            "reverse": reverse
-                        })
-                    id_trasse_jsonb = json.dumps(trasse_list)
-                    print(f"DEBUG: Erweitertes ID_TRASSE_NEU mit reverse-Flag: {id_trasse_jsonb}")
+                id_trasse_jsonb = json.dumps([{"index": i + 1, "id": tid} for i, tid in enumerate(self.selected_trasse_ids_flat)])
                 trassen_ids_pg_array = "{" + ",".join(map(str, set(self.selected_trasse_ids_flat))) + "}"
                 cur.execute("""
                     SELECT ST_AsText(ST_Union(geom))
@@ -2773,8 +2554,6 @@ class LeerrohrVerlegenTool(QDialog):
             if hasattr(self, "route_highlights"):
                 print(f"DEBUG: Anzahl der Highlights NACH Reset: {len(self.route_highlights)}")
             print("DEBUG: Formular wurde erfolgreich zurückgesetzt.")
-            # Neue Ergänzung: Reset Quantities
-            self.subtyp_quantities.clear()
         else:
             is_multirohr = False
             for list_widget in [self.ui.listWidget_Zubringerrohr, self.ui.listWidget_Hauptrohr, self.ui.listWidget_Multirohr]:
@@ -2794,9 +2573,6 @@ class LeerrohrVerlegenTool(QDialog):
             else:
                 print("DEBUG: Mehrfachimport aktiviert, aber kein Multi-Rohr – keine Änderungen")
             self.ui.pushButton_Import.setEnabled(True)
-            self.ui.listWidget_Leerrohr.clear()
-            # Neue Ergänzung: Reset Quantities auch hier, falls nötig – aber bei Mehrfachimport behalten wir sie optional
-            # self.subtyp_quantities.clear()  # Kommentiere aus, wenn du bei Mehrfachimport behalten möchtest
 
     def clear_trasse_selection(self):
         """Setzt die Trassenauswahl zurück."""
@@ -2837,9 +2613,6 @@ class LeerrohrVerlegenTool(QDialog):
         self.selected_trasse_ids = []
         self.selected_trasse_ids_flat = []
         print(f"DEBUG: Anzahl der Highlights NACH Reset: {len(self.route_highlights)}")
-        # Neue Ergänzung: Reset Quantities
-        self.subtyp_quantities.clear()
-        self.ui.listWidget_Leerrohr.clear()
 
     def clear_routing(self):
         """Entfernt alle Routing-Highlights und bereitet graphicsView_Auswahl_Route vor."""
@@ -2894,10 +2667,6 @@ class LeerrohrVerlegenTool(QDialog):
             print("DEBUG: Alle Routing-Highlights entfernt")
         self.selected_trasse_ids = []
         self.selected_trasse_ids_flat = []
-        if hasattr(self, 'conn') and self.conn:
-            self.cur.close()
-            self.conn.close()
-            print("DEBUG: Persistente DB-Verbindung geschlossen")
         self.close()
 
     def closeEvent(self, event):

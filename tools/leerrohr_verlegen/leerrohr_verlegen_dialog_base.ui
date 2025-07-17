@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>531</width>
-    <height>793</height>
+    <width>536</width>
+    <height>794</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -18,7 +18,7 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>531</width>
+     <width>541</width>
      <height>801</height>
     </rect>
    </property>
@@ -42,36 +42,26 @@
     <widget class="QGroupBox" name="groupBox_3">
      <property name="geometry">
       <rect>
-       <x>10</x>
-       <y>650</y>
-       <width>491</width>
-       <height>71</height>
+       <x>0</x>
+       <y>630</y>
+       <width>531</width>
+       <height>91</height>
       </rect>
      </property>
      <property name="title">
       <string>Leerohr Prüfen:</string>
      </property>
-     <widget class="QPushButton" name="pushButton_Datenpruefung">
-      <property name="geometry">
-       <rect>
-        <x>406</x>
-        <y>20</y>
-        <width>84</width>
-        <height>25</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Daten Prüfen</string>
-      </property>
-     </widget>
      <widget class="QLabel" name="label_Status">
       <property name="geometry">
        <rect>
         <x>0</x>
         <y>20</y>
-        <width>401</width>
-        <height>51</height>
+        <width>531</width>
+        <height>71</height>
        </rect>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">padding-left: 10px; padding-top: 5px;</string>
       </property>
       <property name="frameShape">
        <enum>QFrame::Box</enum>
@@ -79,27 +69,20 @@
       <property name="text">
        <string/>
       </property>
-     </widget>
-     <widget class="QPushButton" name="pushButton_Import">
-      <property name="geometry">
-       <rect>
-        <x>406</x>
-        <y>47</y>
-        <width>84</width>
-        <height>23</height>
-       </rect>
+      <property name="alignment">
+       <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
       </property>
-      <property name="text">
-       <string>Import</string>
+      <property name="wordWrap">
+       <bool>true</bool>
       </property>
      </widget>
     </widget>
     <widget class="QDialogButtonBox" name="button_box">
      <property name="geometry">
       <rect>
-       <x>10</x>
+       <x>376</x>
        <y>730</y>
-       <width>491</width>
+       <width>152</width>
        <height>32</height>
       </rect>
      </property>
@@ -110,595 +93,797 @@
       <set>QDialogButtonBox::Cancel|QDialogButtonBox::Reset</set>
      </property>
     </widget>
-    <widget class="QGroupBox" name="groupBox_2">
+    <widget class="QToolBox" name="toolBox">
      <property name="geometry">
       <rect>
-       <x>10</x>
-       <y>416</y>
-       <width>491</width>
-       <height>221</height>
-      </rect>
-     </property>
-     <property name="title">
-      <string>Attribute Leerrohr</string>
-     </property>
-     <widget class="QLabel" name="label_11">
-      <property name="geometry">
-       <rect>
-        <x>10</x>
-        <y>90</y>
-        <width>101</width>
-        <height>16</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Kommentar:</string>
-      </property>
-     </widget>
-     <widget class="QLabel" name="label_12">
-      <property name="geometry">
-       <rect>
-        <x>10</x>
-        <y>26</y>
-        <width>111</width>
-        <height>20</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Verbundnummer:</string>
-      </property>
-     </widget>
-     <widget class="QComboBox" name="comboBox_Verbundnummer">
-      <property name="geometry">
-       <rect>
-        <x>130</x>
-        <y>25</y>
-        <width>81</width>
-        <height>22</height>
-       </rect>
-      </property>
-     </widget>
-     <widget class="QLabel" name="label_13">
-      <property name="geometry">
-       <rect>
-        <x>10</x>
-        <y>60</y>
-        <width>111</width>
-        <height>16</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Gefördert/Förderung:</string>
-      </property>
-     </widget>
-     <widget class="QLabel" name="label_14">
-      <property name="geometry">
-       <rect>
-        <x>10</x>
-        <y>121</y>
-        <width>121</width>
-        <height>16</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Beschreibung:</string>
-      </property>
-     </widget>
-     <widget class="QLineEdit" name="label_Kommentar">
-      <property name="geometry">
-       <rect>
-        <x>130</x>
-        <y>86</y>
-        <width>351</width>
-        <height>22</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string/>
-      </property>
-      <property name="placeholderText">
-       <string>Kommentar hier eingeben...</string>
-      </property>
-     </widget>
-     <widget class="QLineEdit" name="label_Kommentar_2">
-      <property name="geometry">
-       <rect>
-        <x>130</x>
-        <y>116</y>
-        <width>351</width>
-        <height>22</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string/>
-      </property>
-      <property name="placeholderText">
-       <string>Beschreibung hier eingeben...</string>
-      </property>
-     </widget>
-     <widget class="QgsDateTimeEdit" name="mDateTimeEdit_Strecke">
-      <property name="geometry">
-       <rect>
-        <x>130</x>
-        <y>146</y>
-        <width>181</width>
-        <height>22</height>
-       </rect>
-      </property>
-      <property name="displayFormat">
-       <string>dd.MM.yyyy</string>
-      </property>
-     </widget>
-     <widget class="QLabel" name="label_22">
-      <property name="geometry">
-       <rect>
-        <x>10</x>
-        <y>151</y>
-        <width>121</width>
-        <height>16</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Verlegt am:</string>
-      </property>
-     </widget>
-     <widget class="QLabel" name="label_15">
-      <property name="geometry">
-       <rect>
-        <x>10</x>
-        <y>180</y>
-        <width>111</width>
-        <height>16</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Subduct:</string>
-      </property>
-     </widget>
-     <widget class="QPushButton" name="pushButton_subduct">
-      <property name="enabled">
-       <bool>false</bool>
-      </property>
-      <property name="geometry">
-       <rect>
-        <x>209</x>
-        <y>174</y>
-        <width>111</width>
-        <height>25</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Erfasse Hauptrohr</string>
-      </property>
-     </widget>
-     <widget class="QComboBox" name="comboBox_Foerderung">
-      <property name="enabled">
-       <bool>false</bool>
-      </property>
-      <property name="geometry">
-       <rect>
-        <x>210</x>
-        <y>56</y>
-        <width>170</width>
-        <height>22</height>
-       </rect>
-      </property>
-     </widget>
-     <widget class="QCheckBox" name="checkBox_Foerderung">
-      <property name="geometry">
-       <rect>
-        <x>130</x>
-        <y>60</y>
-        <width>67</width>
-        <height>18</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Gefördert</string>
-      </property>
-     </widget>
-     <widget class="QCheckBox" name="checkBox_Subduct">
-      <property name="geometry">
-       <rect>
-        <x>130</x>
-        <y>180</y>
-        <width>67</width>
-        <height>18</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Subduct</string>
-      </property>
-     </widget>
-     <widget class="QLabel" name="label_Subduct">
-      <property name="enabled">
-       <bool>false</bool>
-      </property>
-      <property name="geometry">
-       <rect>
-        <x>320</x>
-        <y>176</y>
-        <width>161</width>
-        <height>22</height>
-       </rect>
-      </property>
-      <property name="frameShape">
-       <enum>QFrame::Box</enum>
-      </property>
-      <property name="text">
-       <string>gewähltes Leerrohr:   </string>
-      </property>
-     </widget>
-    </widget>
-    <widget class="QGroupBox" name="groupBox">
-     <property name="geometry">
-      <rect>
-       <x>10</x>
+       <x>0</x>
        <y>10</y>
-       <width>491</width>
-       <height>161</height>
+       <width>531</width>
+       <height>611</height>
       </rect>
      </property>
-     <property name="title">
-      <string>Verlauf Leerrohr / Erfassung Abzweigung</string>
+     <property name="sizePolicy">
+      <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+       <horstretch>0</horstretch>
+       <verstretch>0</verstretch>
+      </sizepolicy>
      </property>
-     <widget class="QPushButton" name="pushButton_verteiler_2">
+     <property name="autoFillBackground">
+      <bool>true</bool>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">QToolBox::tab { background-color: lightgreen; }
+QToolBox::tab:selected { background-color: darkgrey; }
+</string>
+     </property>
+     <property name="frameShape">
+      <enum>QFrame::Box</enum>
+     </property>
+     <property name="frameShadow">
+      <enum>QFrame::Raised</enum>
+     </property>
+     <property name="currentIndex">
+      <number>0</number>
+     </property>
+     <widget class="QWidget" name="page">
       <property name="geometry">
        <rect>
-        <x>10</x>
-        <y>91</y>
-        <width>141</width>
-        <height>25</height>
+        <x>0</x>
+        <y>0</y>
+        <width>527</width>
+        <height>523</height>
        </rect>
       </property>
-      <property name="text">
-       <string>Verteiler/Knoten</string>
-      </property>
-     </widget>
-     <widget class="QPushButton" name="pushButton_verteiler">
-      <property name="geometry">
-       <rect>
-        <x>10</x>
-        <y>60</y>
-        <width>141</width>
-        <height>25</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Verteiler/Knoten</string>
-      </property>
-     </widget>
-     <widget class="QPushButton" name="pushButton_Parent_Leerrohr">
-      <property name="enabled">
-       <bool>false</bool>
-      </property>
-      <property name="geometry">
-       <rect>
-        <x>10</x>
-        <y>122</y>
-        <width>141</width>
-        <height>25</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Parent Leerrohr</string>
-      </property>
-     </widget>
-     <widget class="QLabel" name="label_gewaehlter_verteiler">
-      <property name="geometry">
-       <rect>
-        <x>160</x>
-        <y>61</y>
-        <width>191</width>
-        <height>22</height>
-       </rect>
-      </property>
-      <property name="autoFillBackground">
-       <bool>false</bool>
-      </property>
-      <property name="styleSheet">
-       <string notr="true">background-color: lightcoral;</string>
-      </property>
-      <property name="inputMethodHints">
-       <set>Qt::ImhNone</set>
-      </property>
-      <property name="frameShape">
-       <enum>QFrame::Box</enum>
-      </property>
-      <property name="frameShadow">
-       <enum>QFrame::Plain</enum>
-      </property>
-      <property name="lineWidth">
-       <number>1</number>
-      </property>
-      <property name="text">
-       <string>Verteiler wählen!</string>
-      </property>
-     </widget>
-     <widget class="QLabel" name="label_Parent_Leerrohr">
-      <property name="enabled">
-       <bool>false</bool>
-      </property>
-      <property name="geometry">
-       <rect>
-        <x>160</x>
-        <y>123</y>
-        <width>191</width>
-        <height>22</height>
-       </rect>
-      </property>
-      <property name="frameShape">
-       <enum>QFrame::Box</enum>
-      </property>
-      <property name="text">
-       <string>gewähltes Leerrohr:   </string>
-      </property>
-     </widget>
-     <widget class="QLabel" name="label_gewaehlter_verteiler_2">
-      <property name="geometry">
-       <rect>
-        <x>160</x>
-        <y>92</y>
-        <width>191</width>
-        <height>22</height>
-       </rect>
-      </property>
-      <property name="styleSheet">
-       <string notr="true">background-color: lightcoral;</string>
-      </property>
-      <property name="frameShape">
-       <enum>QFrame::Box</enum>
-      </property>
-      <property name="text">
-       <string>Verteiler wählen!</string>
-      </property>
-     </widget>
-     <widget class="QPushButton" name="pushButton_routing">
-      <property name="geometry">
-       <rect>
-        <x>360</x>
-        <y>60</y>
-        <width>111</width>
-        <height>55</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Routing</string>
-      </property>
-     </widget>
-     <widget class="QRadioButton" name="radioButton_Abzweigung">
-      <property name="geometry">
-       <rect>
-        <x>100</x>
-        <y>30</y>
-        <width>80</width>
-        <height>18</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Abzweigung</string>
-      </property>
-      <property name="radio" stdset="0">
-       <string/>
-      </property>
-      <attribute name="buttonGroup">
-       <string notr="true">buttonGroup</string>
+      <attribute name="label">
+       <string>Verlauf Leerrohr / Erfassung Abzweigung</string>
       </attribute>
+      <widget class="QRadioButton" name="radioButton_Hauptstrang">
+       <property name="geometry">
+        <rect>
+         <x>14</x>
+         <y>8</y>
+         <width>80</width>
+         <height>18</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>Hauptstrang</string>
+       </property>
+       <property name="checked">
+        <bool>true</bool>
+       </property>
+       <property name="radio" stdset="0">
+        <string/>
+       </property>
+      </widget>
+      <widget class="QRadioButton" name="radioButton_Abzweigung">
+       <property name="geometry">
+        <rect>
+         <x>104</x>
+         <y>8</y>
+         <width>80</width>
+         <height>18</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>Abzweigung</string>
+       </property>
+       <property name="radio" stdset="0">
+        <string/>
+       </property>
+      </widget>
+      <widget class="QGroupBox" name="groupBox">
+       <property name="geometry">
+        <rect>
+         <x>0</x>
+         <y>40</y>
+         <width>521</width>
+         <height>171</height>
+        </rect>
+       </property>
+       <property name="inputMethodHints">
+        <set>Qt::ImhNone</set>
+       </property>
+       <property name="title">
+        <string>Auswahl Leerrohr oder Abzweigung im Bestand</string>
+       </property>
+       <widget class="QPushButton" name="pushButton_select_leerrohr">
+        <property name="geometry">
+         <rect>
+          <x>10</x>
+          <y>19</y>
+          <width>141</width>
+          <height>25</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Leerohr Bestand</string>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_gewaehltes_leerrohr">
+        <property name="geometry">
+         <rect>
+          <x>160</x>
+          <y>20</y>
+          <width>361</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="autoFillBackground">
+         <bool>false</bool>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">background-color: grey;</string>
+        </property>
+        <property name="inputMethodHints">
+         <set>Qt::ImhNone</set>
+        </property>
+        <property name="frameShape">
+         <enum>QFrame::Box</enum>
+        </property>
+        <property name="frameShadow">
+         <enum>QFrame::Plain</enum>
+        </property>
+        <property name="lineWidth">
+         <number>1</number>
+        </property>
+        <property name="text">
+         <string>Leerrohr wählen (optional)</string>
+        </property>
+       </widget>
+       <widget class="QListWidget" name="listWidget_Leerrohr">
+        <property name="geometry">
+         <rect>
+          <x>10</x>
+          <y>50</y>
+          <width>511</width>
+          <height>101</height>
+         </rect>
+        </property>
+        <property name="inputMethodHints">
+         <set>Qt::ImhMultiLine</set>
+        </property>
+       </widget>
+      </widget>
+      <widget class="QGroupBox" name="groupBox_4">
+       <property name="geometry">
+        <rect>
+         <x>0</x>
+         <y>220</y>
+         <width>521</width>
+         <height>301</height>
+        </rect>
+       </property>
+       <property name="title">
+        <string>Routing</string>
+       </property>
+       <widget class="QPushButton" name="pushButton_Parent_Leerrohr">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="geometry">
+         <rect>
+          <x>10</x>
+          <y>112</y>
+          <width>141</width>
+          <height>25</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Parent Leerrohr</string>
+        </property>
+       </widget>
+       <widget class="QPushButton" name="pushButton_routing">
+        <property name="geometry">
+         <rect>
+          <x>360</x>
+          <y>20</y>
+          <width>111</width>
+          <height>87</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Routing</string>
+        </property>
+       </widget>
+       <widget class="QGraphicsView" name="graphicsView_Auswahl_Route">
+        <property name="geometry">
+         <rect>
+          <x>10</x>
+          <y>152</y>
+          <width>341</width>
+          <height>111</height>
+         </rect>
+        </property>
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+        </property>
+       </widget>
+       <widget class="QPushButton" name="pushButton_zwischenknoten">
+        <property name="geometry">
+         <rect>
+          <x>10</x>
+          <y>51</y>
+          <width>141</width>
+          <height>25</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Zwischenknoten</string>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_gewaehlter_zwischenknoten">
+        <property name="geometry">
+         <rect>
+          <x>160</x>
+          <y>52</y>
+          <width>191</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">background-color: grey;</string>
+        </property>
+        <property name="frameShape">
+         <enum>QFrame::Box</enum>
+        </property>
+        <property name="text">
+         <string>Knoten wählen! (optional)</string>
+        </property>
+       </widget>
+       <widget class="QPushButton" name="pushButton_verteiler_2">
+        <property name="geometry">
+         <rect>
+          <x>10</x>
+          <y>81</y>
+          <width>141</width>
+          <height>25</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Verteiler/Knoten</string>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_Parent_Leerrohr">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="geometry">
+         <rect>
+          <x>160</x>
+          <y>113</y>
+          <width>191</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="frameShape">
+         <enum>QFrame::Box</enum>
+        </property>
+        <property name="text">
+         <string>gewähltes Leerrohr:   </string>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_gewaehlter_verteiler_2">
+        <property name="geometry">
+         <rect>
+          <x>160</x>
+          <y>82</y>
+          <width>191</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">background-color: lightcoral;</string>
+        </property>
+        <property name="frameShape">
+         <enum>QFrame::Box</enum>
+        </property>
+        <property name="text">
+         <string>Verteiler wählen!</string>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_gewaehlter_verteiler">
+        <property name="geometry">
+         <rect>
+          <x>160</x>
+          <y>21</y>
+          <width>191</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="autoFillBackground">
+         <bool>false</bool>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">background-color: lightcoral;</string>
+        </property>
+        <property name="inputMethodHints">
+         <set>Qt::ImhNone</set>
+        </property>
+        <property name="frameShape">
+         <enum>QFrame::Box</enum>
+        </property>
+        <property name="frameShadow">
+         <enum>QFrame::Plain</enum>
+        </property>
+        <property name="lineWidth">
+         <number>1</number>
+        </property>
+        <property name="text">
+         <string>Verteiler wählen!</string>
+        </property>
+       </widget>
+       <widget class="QPushButton" name="pushButton_verteiler">
+        <property name="geometry">
+         <rect>
+          <x>10</x>
+          <y>20</y>
+          <width>141</width>
+          <height>25</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Verteiler/Knoten</string>
+        </property>
+       </widget>
+      </widget>
      </widget>
-     <widget class="QRadioButton" name="radioButton_Hauptstrang">
+     <widget class="QWidget" name="page_2">
       <property name="geometry">
        <rect>
-        <x>10</x>
-        <y>30</y>
-        <width>80</width>
-        <height>18</height>
+        <x>0</x>
+        <y>0</y>
+        <width>527</width>
+        <height>523</height>
        </rect>
       </property>
-      <property name="text">
-       <string>Hauptstrang</string>
-      </property>
-      <property name="checked">
-       <bool>true</bool>
-      </property>
-      <property name="radio" stdset="0">
-       <string/>
-      </property>
-      <attribute name="buttonGroup">
-       <string notr="true">buttonGroup</string>
+      <attribute name="label">
+       <string>Auswahl Typen und Subtypen</string>
       </attribute>
+      <widget class="QGraphicsView" name="graphicsView_Auswahl_Subtyp">
+       <property name="geometry">
+        <rect>
+         <x>0</x>
+         <y>280</y>
+         <width>521</width>
+         <height>241</height>
+        </rect>
+       </property>
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Expanding">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="styleSheet">
+        <string notr="true">padding-left: 10px; padding-top: 5px;</string>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+       </property>
+      </widget>
+      <widget class="QTabWidget" name="tabWidget_6">
+       <property name="geometry">
+        <rect>
+         <x>0</x>
+         <y>0</y>
+         <width>601</width>
+         <height>271</height>
+        </rect>
+       </property>
+       <property name="currentIndex">
+        <number>2</number>
+       </property>
+       <widget class="QWidget" name="tab_4">
+        <attribute name="title">
+         <string>Zubringerrohr</string>
+        </attribute>
+        <widget class="QListWidget" name="listWidget_Zubringerrohr">
+         <property name="geometry">
+          <rect>
+           <x>0</x>
+           <y>5</y>
+           <width>591</width>
+           <height>241</height>
+          </rect>
+         </property>
+         <property name="selectionMode">
+          <enum>QAbstractItemView::MultiSelection</enum>
+         </property>
+        </widget>
+       </widget>
+       <widget class="QWidget" name="tab_14">
+        <attribute name="title">
+         <string>Hauptrohr</string>
+        </attribute>
+        <widget class="QListWidget" name="listWidget_Hauptrohr">
+         <property name="geometry">
+          <rect>
+           <x>0</x>
+           <y>5</y>
+           <width>591</width>
+           <height>241</height>
+          </rect>
+         </property>
+         <property name="selectionMode">
+          <enum>QAbstractItemView::MultiSelection</enum>
+         </property>
+        </widget>
+       </widget>
+       <widget class="QWidget" name="tab_3">
+        <attribute name="title">
+         <string>Multirohr</string>
+        </attribute>
+        <widget class="QListWidget" name="listWidget_Multirohr">
+         <property name="geometry">
+          <rect>
+           <x>0</x>
+           <y>5</y>
+           <width>521</width>
+           <height>241</height>
+          </rect>
+         </property>
+         <property name="styleSheet">
+          <string notr="true"/>
+         </property>
+         <property name="selectionMode">
+          <enum>QAbstractItemView::MultiSelection</enum>
+         </property>
+        </widget>
+       </widget>
+      </widget>
+     </widget>
+     <widget class="QWidget" name="page_3">
+      <property name="geometry">
+       <rect>
+        <x>0</x>
+        <y>0</y>
+        <width>527</width>
+        <height>523</height>
+       </rect>
+      </property>
+      <attribute name="label">
+       <string>Atttributierung Leerrohr</string>
+      </attribute>
+      <widget class="QGroupBox" name="groupBox_2">
+       <property name="geometry">
+        <rect>
+         <x>0</x>
+         <y>0</y>
+         <width>531</width>
+         <height>531</height>
+        </rect>
+       </property>
+       <property name="title">
+        <string/>
+       </property>
+       <widget class="QLabel" name="label_11">
+        <property name="geometry">
+         <rect>
+          <x>10</x>
+          <y>90</y>
+          <width>101</width>
+          <height>16</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Kommentar:</string>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_12">
+        <property name="geometry">
+         <rect>
+          <x>10</x>
+          <y>26</y>
+          <width>111</width>
+          <height>20</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Verbundnummer:</string>
+        </property>
+       </widget>
+       <widget class="QComboBox" name="comboBox_Verbundnummer">
+        <property name="geometry">
+         <rect>
+          <x>130</x>
+          <y>25</y>
+          <width>81</width>
+          <height>22</height>
+         </rect>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_13">
+        <property name="geometry">
+         <rect>
+          <x>10</x>
+          <y>60</y>
+          <width>111</width>
+          <height>16</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Gefördert/Förderung:</string>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_14">
+        <property name="geometry">
+         <rect>
+          <x>10</x>
+          <y>121</y>
+          <width>121</width>
+          <height>16</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Beschreibung:</string>
+        </property>
+       </widget>
+       <widget class="QLineEdit" name="label_Kommentar">
+        <property name="geometry">
+         <rect>
+          <x>130</x>
+          <y>86</y>
+          <width>351</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="placeholderText">
+         <string>Kommentar hier eingeben...</string>
+        </property>
+       </widget>
+       <widget class="QLineEdit" name="label_Kommentar_2">
+        <property name="geometry">
+         <rect>
+          <x>130</x>
+          <y>116</y>
+          <width>351</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="placeholderText">
+         <string>Beschreibung hier eingeben...</string>
+        </property>
+       </widget>
+       <widget class="QgsDateTimeEdit" name="mDateTimeEdit_Strecke">
+        <property name="geometry">
+         <rect>
+          <x>130</x>
+          <y>146</y>
+          <width>181</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="displayFormat">
+         <string>dd.MM.yyyy</string>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_22">
+        <property name="geometry">
+         <rect>
+          <x>10</x>
+          <y>151</y>
+          <width>121</width>
+          <height>16</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Verlegt am:</string>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_15">
+        <property name="geometry">
+         <rect>
+          <x>10</x>
+          <y>180</y>
+          <width>111</width>
+          <height>16</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Subduct:</string>
+        </property>
+       </widget>
+       <widget class="QPushButton" name="pushButton_subduct">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="geometry">
+         <rect>
+          <x>209</x>
+          <y>174</y>
+          <width>111</width>
+          <height>25</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Erfasse Hauptrohr</string>
+        </property>
+       </widget>
+       <widget class="QComboBox" name="comboBox_Foerderung">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="geometry">
+         <rect>
+          <x>210</x>
+          <y>56</y>
+          <width>170</width>
+          <height>22</height>
+         </rect>
+        </property>
+       </widget>
+       <widget class="QCheckBox" name="checkBox_Foerderung">
+        <property name="geometry">
+         <rect>
+          <x>130</x>
+          <y>60</y>
+          <width>67</width>
+          <height>18</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Gefördert</string>
+        </property>
+       </widget>
+       <widget class="QCheckBox" name="checkBox_Subduct">
+        <property name="geometry">
+         <rect>
+          <x>130</x>
+          <y>180</y>
+          <width>67</width>
+          <height>18</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Subduct</string>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_Subduct">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="geometry">
+         <rect>
+          <x>320</x>
+          <y>176</y>
+          <width>161</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="frameShape">
+         <enum>QFrame::Box</enum>
+        </property>
+        <property name="text">
+         <string>gewähltes Leerrohr:   </string>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_16">
+        <property name="geometry">
+         <rect>
+          <x>10</x>
+          <y>211</y>
+          <width>111</width>
+          <height>20</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Count-Wert:</string>
+        </property>
+       </widget>
+       <widget class="QComboBox" name="comboBox_Countwert">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="geometry">
+         <rect>
+          <x>130</x>
+          <y>210</y>
+          <width>81</width>
+          <height>22</height>
+         </rect>
+        </property>
+       </widget>
+       <widget class="QComboBox" name="comboBox_Status">
+        <property name="geometry">
+         <rect>
+          <x>130</x>
+          <y>239</y>
+          <width>181</width>
+          <height>22</height>
+         </rect>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_17">
+        <property name="geometry">
+         <rect>
+          <x>10</x>
+          <y>240</y>
+          <width>111</width>
+          <height>20</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Status:</string>
+        </property>
+       </widget>
+       <widget class="QComboBox" name="comboBox_Eigner">
+        <property name="geometry">
+         <rect>
+          <x>130</x>
+          <y>269</y>
+          <width>181</width>
+          <height>22</height>
+         </rect>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_18">
+        <property name="geometry">
+         <rect>
+          <x>10</x>
+          <y>270</y>
+          <width>111</width>
+          <height>20</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Eigner:</string>
+        </property>
+       </widget>
+      </widget>
      </widget>
     </widget>
-    <widget class="QGroupBox" name="groupBox_4">
+    <widget class="QPushButton" name="pushButton_Datenpruefung">
      <property name="geometry">
       <rect>
-       <x>10</x>
-       <y>177</y>
-       <width>491</width>
-       <height>231</height>
-      </rect>
-     </property>
-     <property name="title">
-      <string>Auswahl Leerrohr</string>
-     </property>
-     <widget class="QLabel" name="label">
-      <property name="geometry">
-       <rect>
-        <x>10</x>
-        <y>28</y>
-        <width>121</width>
-        <height>16</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Leerrohrtyp auswählen:</string>
-      </property>
-     </widget>
-     <widget class="QComboBox" name="comboBox_leerrohr_typ">
-      <property name="geometry">
-       <rect>
-        <x>10</x>
-        <y>48</y>
-        <width>181</width>
-        <height>22</height>
-       </rect>
-      </property>
-     </widget>
-     <widget class="QLabel" name="label_6">
-      <property name="geometry">
-       <rect>
-        <x>230</x>
-        <y>28</y>
-        <width>111</width>
-        <height>16</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>gewählter Leerrohrtyp:</string>
-      </property>
-     </widget>
-     <widget class="QComboBox" name="comboBox_leerrohr_typ_2">
-      <property name="geometry">
-       <rect>
-        <x>10</x>
-        <y>140</y>
-        <width>181</width>
-        <height>22</height>
-       </rect>
-      </property>
-     </widget>
-     <widget class="QLabel" name="label_10">
-      <property name="geometry">
-       <rect>
-        <x>230</x>
-        <y>120</y>
-        <width>141</width>
-        <height>16</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>gewählter Leerrohrsubtyp:</string>
-      </property>
-     </widget>
-     <widget class="QLabel" name="label_2">
-      <property name="geometry">
-       <rect>
-        <x>10</x>
-        <y>120</y>
-        <width>161</width>
-        <height>16</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Leerrohrsubtyp auswählen:</string>
-      </property>
-     </widget>
-     <widget class="QLabel" name="label_16">
-      <property name="geometry">
-       <rect>
-        <x>120</x>
-        <y>74</y>
-        <width>111</width>
-        <height>20</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Farbschema:</string>
-      </property>
-     </widget>
-     <widget class="QComboBox" name="comboBox_Farbschema">
-      <property name="geometry">
-       <rect>
-        <x>120</x>
-        <y>94</y>
-        <width>71</width>
-        <height>22</height>
-       </rect>
-      </property>
-     </widget>
-     <widget class="QComboBox" name="comboBox_Firma">
-      <property name="geometry">
-       <rect>
-        <x>10</x>
-        <y>94</y>
-        <width>111</width>
-        <height>22</height>
-       </rect>
-      </property>
-     </widget>
-     <widget class="QLabel" name="label_18">
-      <property name="geometry">
-       <rect>
-        <x>10</x>
-        <y>74</y>
-        <width>111</width>
-        <height>20</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Firma:</string>
-      </property>
-     </widget>
-     <widget class="QLabel" name="label_gewaehltes_leerrohr">
-      <property name="geometry">
-       <rect>
-        <x>230</x>
-        <y>49</y>
-        <width>241</width>
-        <height>22</height>
-       </rect>
-      </property>
-      <property name="frameShape">
-       <enum>QFrame::Box</enum>
-      </property>
-      <property name="text">
-       <string>Gewählter Typ</string>
-      </property>
-     </widget>
-     <widget class="QLabel" name="label_gewaehltes_leerrohr_2">
-      <property name="geometry">
-       <rect>
-        <x>230</x>
-        <y>140</y>
-        <width>241</width>
-        <height>22</height>
-       </rect>
-      </property>
-      <property name="frameShape">
-       <enum>QFrame::Box</enum>
-      </property>
-      <property name="text">
-       <string>Gewählter Sub-Typ</string>
-      </property>
-     </widget>
-     <widget class="QGraphicsView" name="graphicsView_Auswahl_Rohre">
-      <property name="geometry">
-       <rect>
-        <x>1</x>
-        <y>180</y>
-        <width>490</width>
-        <height>51</height>
-       </rect>
-      </property>
-     </widget>
-    </widget>
-    <widget class="QCheckBox" name="checkBox_clearForm">
-     <property name="geometry">
-      <rect>
-       <x>230</x>
-       <y>737</y>
-       <width>101</width>
-       <height>18</height>
+       <x>3</x>
+       <y>734</y>
+       <width>84</width>
+       <height>23</height>
       </rect>
      </property>
      <property name="text">
-      <string>Mehrfachimport</string>
+      <string>Daten Prüfen</string>
      </property>
     </widget>
-   </widget>
-   <widget class="QWidget" name="tab_2">
-    <attribute name="title">
-     <string>Leerrohr Verwaltung</string>
-    </attribute>
+    <widget class="QPushButton" name="pushButton_Import">
+     <property name="geometry">
+      <rect>
+       <x>127</x>
+       <y>734</y>
+       <width>84</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Import</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="pushButton_update_leerrohr">
+     <property name="geometry">
+      <rect>
+       <x>218</x>
+       <y>734</y>
+       <width>111</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Update Lererohr</string>
+     </property>
+    </widget>
    </widget>
   </widget>
  </widget>
@@ -711,7 +896,4 @@
  </customwidgets>
  <resources/>
  <connections/>
- <buttongroups>
-  <buttongroup name="buttonGroup"/>
- </buttongroups>
 </ui>

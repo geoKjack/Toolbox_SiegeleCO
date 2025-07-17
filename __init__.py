@@ -11,10 +11,10 @@
 from . import resources_rc
 
 # Import der Hauptklasse des Plugins
-from .main import TollBoxSiegeleCoPlugin
+from .main import ToolBoxSiegeleCoPlugin
 
 # noinspection PyPep8Naming
 def classFactory(iface):  # pylint: disable=invalid-name
-    """Load TollBoxSiegeleCoPlugin class from file main.py."""
-    # Lade die TollBoxSiegeleCoPlugin-Klasse aus main.py
-    return TollBoxSiegeleCoPlugin(iface)
+    """Load ToollBoxSiegeleCoPlugin class from file main.py."""
+    # Lade die ToolBoxSiegeleCoPlugin-Klasse aus main.py
+    return ToolBoxSiegeleCoPlugin(iface)
