@@ -1,5 +1,6 @@
 <RCC>
     <qresource prefix="/plugins/ToolBox_SiegeleCo">
+        <file>icons/setup_Toolbox.png</file>
         <file>icons/icon_kabel_verlegen.png</file>
         <file>icons/icon_kundendaten_tool.png</file>
         <file>icons/icon_split_tool.png</file>

@@ -16,7 +16,7 @@
   <widget class="QPushButton" name="pushButton_splittool">
    <property name="geometry">
     <rect>
-     <x>40</x>
+     <x>160</x>
      <y>10</y>
      <width>24</width>
      <height>24</height>
@@ -81,7 +81,7 @@
   <widget class="QPushButton" name="pushButton_tool">
    <property name="geometry">
     <rect>
-     <x>160</x>
+     <x>40</x>
      <y>10</y>
      <width>24</width>
      <height>24</height>

@@ -16,7 +16,7 @@ class Ui_Dialog(object):
         Dialog.setObjectName("Dialog")
         Dialog.resize(191, 41)
         self.pushButton_splittool = QtWidgets.QPushButton(Dialog)
-        self.pushButton_splittool.setGeometry(QtCore.QRect(40, 10, 24, 24))
+        self.pushButton_splittool.setGeometry(QtCore.QRect(160, 10, 24, 24))
         self.pushButton_splittool.setObjectName("pushButton_splittool")
         self.pushButton_kundendaten = QtWidgets.QPushButton(Dialog)
         self.pushButton_kundendaten.setGeometry(QtCore.QRect(130, 10, 24, 24))
@@ -31,7 +31,7 @@ class Ui_Dialog(object):
         self.pushButton_leerrohr_verwalten.setGeometry(QtCore.QRect(100, 10, 24, 24))
         self.pushButton_leerrohr_verwalten.setObjectName("pushButton_leerrohr_verwalten")
         self.pushButton_tool = QtWidgets.QPushButton(Dialog)
-        self.pushButton_tool.setGeometry(QtCore.QRect(160, 10, 24, 24))
+        self.pushButton_tool.setGeometry(QtCore.QRect(40, 10, 24, 24))
         self.pushButton_tool.setObjectName("pushButton_tool")
 
         self.retranslateUi(Dialog)
@@ -39,10 +39,10 @@ class Ui_Dialog(object):
 
     def retranslateUi(self, Dialog):
         _translate = QtCore.QCoreApplication.translate
-        Dialog.setWindowTitle(_translate("Dialog", "Toolbox"))
-        self.pushButton_splittool.setText(_translate("Dialog", "Split Tool"))
-        self.pushButton_kundendaten.setText(_translate("Dialog", "Kundendaten"))
-        self.pushButton_kabel_verlegen.setText(_translate("Dialog", "Kabel Verlegen"))
-        self.pushButton_trasse_verwalten.setText(_translate("Dialog", "Trasse Verwalten"))
-        self.pushButton_leerrohr_verwalten.setText(_translate("Dialog", "Leerrohr Verwalten"))
-        self.pushButton_tool.setText(_translate("Dialog", "Tool"))
+        Dialog.setWindowTitle(_translate("Dialog", "Dialog"))
+        self.pushButton_splittool.setText(_translate("Dialog", "PushButton"))
+        self.pushButton_kundendaten.setText(_translate("Dialog", "PushButton"))
+        self.pushButton_kabel_verlegen.setText(_translate("Dialog", "PushButton"))
+        self.pushButton_trasse_verwalten.setText(_translate("Dialog", "PushButton"))
+        self.pushButton_leerrohr_verwalten.setText(_translate("Dialog", "PushButton"))
+        self.pushButton_tool.setText(_translate("Dialog", "PushButton"))
