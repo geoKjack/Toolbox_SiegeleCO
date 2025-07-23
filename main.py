@@ -5,6 +5,7 @@ from PyQt5.QtCore import Qt, QSettings
 from . import resources
 from .tools.leerrohr_verlegen.leerrohr_verlegen import LeerrohrVerlegenTool
 from .tools.hauseinfuehrung_verlegen.hauseinfuehrung_verlegen import HauseinfuehrungsVerlegungsTool
+import logging
 
 import sys, sip
 sys.path.append(r'C:\Users\marce\AppData\Roaming\QGIS\QGIS3\profiles\default\python\plugins\ToolBox_SiegeleCo')
@@ -27,8 +28,13 @@ class ToolBoxSiegeleCoPlugin:
         self.toolbar = None
         self.kabel_tool = None
         self.leerrohr_tool = None
+        self.hausanschluss_tool = None
         self.setup_label = None
         self.settings = QSettings("SiegeleCo", "ToolBox")
+        self.active_setup = {}  # Dict für aktives Setup
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+        self.logger = logging.getLogger(__name__)
+        self.logger.info("ToolBoxSiegeleCoPlugin initialisiert")
 
     def initGui(self):
         self.toolbar = self.iface.addToolBar("Toolbox SiegeleCo")
@@ -38,11 +44,11 @@ class ToolBoxSiegeleCoPlugin:
         self.toolbar.addWidget(self.setup_label)
         
         self.add_toolbar_action("Setup Tool", self.run_setup_tool, ":/plugins/ToolBox_SiegeleCo/icons/setup_Toolbox.png")
-        self.add_toolbar_action("Leerrohr Verwalten", self.run_leerrohrverwalten_tool, ":/plugins/ToolBox_SiegeleCo/icons/icon_leerrohr_verwalten_tool.png")
-        self.add_toolbar_action("Kabel Verlegen Tool", self.run_kabel_verlegen, ":/plugins/ToolBox_SiegeleCo/icons/icon_kabel_verlegen.png")
-        self.add_toolbar_action("Trasse Verwalten Tool", self.run_trasse_verwalten, ":/plugins/ToolBox_SiegeleCo/icons/icon_trasse_verwalten_tool.png")
-        self.add_toolbar_action("Leerrohr Erfassen Tool", self.run_leerrohr_erfassen, ":/plugins/ToolBox_SiegeleCo/icons/icon_leerrohr_verwalten_tool.png")
+        self.add_toolbar_action("Leerrohr Verlegen/Verwalten Tool", self.run_leerrohr_erfassen, ":/plugins/ToolBox_SiegeleCo/icons/icon_leerrohr_verlegen_tool.png")
+        self.add_toolbar_action("Leerrohr Verbinden", self.run_leerrohrverbinden_tool, ":/plugins/ToolBox_SiegeleCo/icons/icon_leerohr_verbinden_tool.png")
         self.add_toolbar_action("Hausanschluss Tool", self.run_hausanschluss_verlegen, ":/plugins/ToolBox_SiegeleCo/icons/icon_hausanschluesse.png")
+        self.add_toolbar_action("Kabel Verlegen Tool", self.run_kabel_verlegen, ":/plugins/ToolBox_SiegeleCo/icons/icon_kabel_verlegen.png")
+        self.add_toolbar_action("Spleiss Tool", self.run_spleisstool, ":/plugins/ToolBox_SiegeleCo/icons/icon_spleiss_tool.png")
 
     def add_toolbar_action(self, name, function, icon_path):
         icon = QIcon(icon_path)
@@ -55,15 +61,30 @@ class ToolBoxSiegeleCoPlugin:
         self.toolbar.addAction(action)
 
     def update_setup_label(self):
-        setup_name = self.settings.value("name", "Kein Setup gewählt")
+        setup_name = self.settings.value("name", "Kein Setup aktiv")
         umgebung = self.settings.value("umgebung", None)
         self.setup_label.setText(f"Aktiv: {setup_name}")
         if umgebung == "Produktivumgebung":
-            self.setup_label.setStyleSheet("color: green; padding: 5px; font-weight: bold;")
-        elif umgebung == "Testumgebung":
             self.setup_label.setStyleSheet("color: red; padding: 5px; font-weight: bold;")
+        elif umgebung == "Testumgebung":
+            self.setup_label.setStyleSheet("color: green; padding: 5px; font-weight: bold;")
         else:
-            self.setup_label.setStyleSheet("color: black; padding: 5px; font-weight: bold;")
+            self.setup_label.setStyleSheet("color: grey; padding: 5px; font-weight: bold;")
+        # Aktualisiere active_setup
+        self.active_setup = {
+            "name": setup_name,
+            "umgebung": umgebung,
+            "firma": self.settings.value("firma", "").split(", ") if self.settings.value("firma", "") else [],
+            "codierung_leerrohr": self.settings.value("codierung_leerrohr", "").split(", ") if self.settings.value("codierung_leerrohr", "") else [],
+            "codierung_buendel": self.settings.value("codierung_buendel", "").split(", ") if self.settings.value("codierung_buendel", "") else [],
+            "codierung_faser": self.settings.value("codierung_faser", "").split(", ") if self.settings.value("codierung_faser", "") else [],
+            "eigner": self.settings.value("eigner", "").split(", ") if self.settings.value("eigner", "") else [],
+            "auftraggeber": self.settings.value("auftraggeber", ""),
+            "leerohr_subtyp": [int(x) for x in self.settings.value("leerohr_subtyp", []) if x] if self.settings.value("leerohr_subtyp", []) else [],
+            "qgis_project_path": self.settings.value("qgis_project_path", ""),
+            "db_connection": self.settings.value("db_connection", "")
+        }
+        self.logger.info(f"Aktives Setup aktualisiert: {self.active_setup}")
 
     def run_setup_tool(self):
         from .tools.setup_Toolbox.setup_tool import SetupTool
@@ -71,13 +92,8 @@ class ToolBoxSiegeleCoPlugin:
         setup.exec_()
         self.update_setup_label()
 
-    def run_split_tool(self):
-        if not self.settings.value("name"):
-            self.iface.messageBar().pushMessage("Fehler", "Bitte wählen Sie zuerst ein Setup im Setup-Tool aus!", level=Qgis.Critical)
-            return
-        self.iface.messageBar().pushMessage("Split Tool aktiviert", level=Qgis.Info)
 
-    def run_leerrohrverwalten_tool(self):
+    def run_leerrohrverbinden_tool(self):
         if not self.settings.value("name"):
             self.iface.messageBar().pushMessage("Fehler", "Bitte wählen Sie zuerst ein Setup im Setup-Tool aus!", level=Qgis.Critical)
             return
@@ -92,11 +108,11 @@ class ToolBoxSiegeleCoPlugin:
             self.kabel_tool = KabelVerlegungsTool(self.iface)
         self.kabel_tool.run()
 
-    def run_trasse_verwalten(self):
+    def run_spleisstool(self):
         if not self.settings.value("name"):
             self.iface.messageBar().pushMessage("Fehler", "Bitte wählen Sie zuerst ein Setup im Setup-Tool aus!", level=Qgis.Critical)
             return
-        self.iface.messageBar().pushMessage("Trasse Verwalten Tool aktiviert", level=Qgis.Info)
+        self.iface.messageBar().pushMessage("Spleiss-Tool aktiviert", level=Qgis.Info)
 
     def run_leerrohr_erfassen(self):
         if not self.settings.value("name"):
@@ -124,3 +140,19 @@ class ToolBoxSiegeleCoPlugin:
         if self.toolbar:
             self.iface.mainWindow().removeToolBar(self.toolbar)
             self.toolbar = None
+        # Reset QSettings bei Beenden
+        self.settings.remove("connection_username")
+        self.settings.remove("connection_password")
+        self.settings.remove("connection_umgebung")
+        self.settings.remove("firma")
+        self.settings.remove("codierung_leerrohr")
+        self.settings.remove("codierung_buendel")
+        self.settings.remove("codierung_faser")
+        self.settings.remove("auftraggeber")
+        self.settings.remove("eigner")
+        self.settings.remove("name")
+        self.settings.remove("leerohr_subtyp")
+        self.settings.remove("qgis_project_path")
+        self.settings.remove("db_connection")
+        self.active_setup = {}  # Reset Setup-Dict
+        self.logger.info("Plugin entladen, Einstellungen zurückgesetzt")

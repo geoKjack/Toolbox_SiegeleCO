@@ -69,8 +69,10 @@ class SetupTool(QDialog):
         self.iface = iface
         self.settings = QSettings("SiegeleCo", "ToolBox")
         self.is_connected = False
-        self.current_setup_id = None  # Speichert die ID des aktuell geladenen Setups
-        self.current_qgis_project_path = ""  # Speichert den aktuellen qgis_proj-Pfad
+        self.current_setup_id = None
+        self.current_qgis_project_path = ""
+        self.conn = None  # Für offene Datenbankverbindung
+        self.data_cache = {}  # Für spätere Cache-Implementierung
 
         QgsMessageLog.logMessage(f"tableView initialized: {self.ui.tableView is not None}", "SetupTool", Qgis.Info)
 
@@ -93,26 +95,22 @@ class SetupTool(QDialog):
         self.ui.listWidget_Eigner.setStyleSheet(style_sheet)
         self.ui.listWidget_Leerohr_SubTyp.setStyleSheet(style_sheet)
 
-        # Konfiguriere QgsFileWidget
+        # QgsFileWidget konfigurieren
         try:
             self.ui.mQgsFileWidget.setFilter("QGIS-Projekte (*.qgz)")
             self.ui.mQgsFileWidget.setStorageMode(self.ui.mQgsFileWidget.StorageMode.GetFile)
             self.ui.mQgsFileWidget.fileChanged.connect(self.update_qgis_project_label)
             QgsMessageLog.logMessage("QgsFileWidget erfolgreich initialisiert.", "SetupTool", Qgis.Info)
         except AttributeError as e:
-            QgsMessageLog.logMessage(f"Fehler: mQgsFileWidget nicht gefunden. Bitte überprüfen Sie den objectName in der UI-Datei: {e}", "SetupTool", Qgis.Critical)
+            QgsMessageLog.logMessage(f"Fehler: mQgsFileWidget nicht gefunden: {e}", "SetupTool", Qgis.Critical)
 
         try:
             self.ui.label_qgz.setText("Kein QGIS-Projekt gewählt")
             QgsMessageLog.logMessage("label_qgz erfolgreich initialisiert.", "SetupTool", Qgis.Info)
         except AttributeError as e:
-            QgsMessageLog.logMessage(f"Fehler: label_qgz nicht gefunden. Bitte überprüfen Sie den objectName in der UI-Datei: {e}", "SetupTool", Qgis.Critical)
+            QgsMessageLog.logMessage(f"Fehler: label_qgz nicht gefunden: {e}", "SetupTool", Qgis.Critical)
 
-        # Blockiere Signale während der Initialisierung
-        self.ui.listWidget_Firma.blockSignals(True)
-        self.ui.listWidget_Leerohr.blockSignals(True)
-
-        # Verknüpfe Signale
+        # Signale verknüpfen
         self.ui.pushButton_Save.clicked.connect(self.save_settings)
         self.ui.button_box.button(self.ui.button_box.Cancel).clicked.connect(self.close)
         self.ui.button_box.button(self.ui.button_box.Reset).clicked.connect(self.reset_settings)
@@ -122,7 +120,7 @@ class SetupTool(QDialog):
         self.ui.pushButton_Verbindung.clicked.connect(self.test_connection)
         self.ui.pushButton_Verbindung_Trennen.clicked.connect(self.disconnect_connection)
         self.ui.comboBox_Auftraggeber.currentTextChanged.connect(self.update_auftraggeber_label)
-        self.ui.pushButton_Codierung.clicked.connect(self.update_codierung_from_subtyp)  # Neue Signalverbindung
+        self.ui.pushButton_Codierung.clicked.connect(self.update_codierung_from_subtyp)
 
         if self.ui.tableView is not None and self.ui.tableView.selectionModel() is not None:
             self.ui.tableView.selectionModel().selectionChanged.connect(self.update_table_selection)
@@ -130,15 +128,13 @@ class SetupTool(QDialog):
         self.ui.listWidget_Firma.itemSelectionChanged.connect(self.update_leerrohr_subtyp)
         self.ui.listWidget_Leerohr.itemSelectionChanged.connect(self.update_leerrohr_subtyp)
 
-        # Initialisierung ohne automatische Verbindung, aber mit Laden der gespeicherten Verbindung
+        # Umgebung befüllen und Farbe setzen
         self.populate_umgebung()
-        self.load_connection_settings()
         self.update_setup_label()
         self.update_qgis_project_label()
 
-        # Signale wieder freigeben
-        self.ui.listWidget_Firma.blockSignals(False)
-        self.ui.listWidget_Leerohr.blockSignals(False)
+        # Automatisch laden, wenn gespeicherte Verbindung existiert
+        self.load_connection_settings()
 
     def update_setup_label(self):
         try:
@@ -182,82 +178,173 @@ class SetupTool(QDialog):
             index = self.ui.comboBox_Umgebung.findText(umgebung)
             if index != -1:
                 self.ui.comboBox_Umgebung.setCurrentIndex(index)
-            self.is_connected = True
-            self.ui.pushButton_Verbindung.setStyleSheet("background-color: #90EE90;")
-
-            # Befülle die UI mit gespeicherten Einstellungen
-            self.populate_firma(username, password, umgebung)
-            self.populate_codierung_leerrohr(username, password, umgebung)
-            self.populate_auftraggeber(username, password, umgebung)
-            self.populate_codierung_buendel(username, password, umgebung)
-            self.populate_codierung_faser(username, password, umgebung)
-            self.populate_eigner()
-            self.load_configurations()
-
-            # Stelle die gespeicherte Auswahl wieder her
-            firma = self.settings.value("firma", "").split(", ") if self.settings.value("firma", "") else []
-            codierung_leerrohr = self.settings.value("codierung_leerrohr", "").split(", ") if self.settings.value("codierung_leerrohr", "") else []
-            codierung_buendel = self.settings.value("codierung_buendel", "").split(", ") if self.settings.value("codierung_buendel", "") else []
-            codierung_faser = self.settings.value("codierung_faser", "").split(", ") if self.settings.value("codierung_faser", "") else []
-            eigner = self.settings.value("eigner", "").split(", ") if self.settings.value("eigner", "") else []
-            auftraggeber = self.settings.value("auftraggeber", "")
-            leerohr_subtyp = [int(x) for x in self.settings.value("leerohr_subtyp", []) if x] if self.settings.value("leerohr_subtyp", []) else []
-            name = self.settings.value("name", "")
-            self.current_qgis_project_path = self.settings.value("qgis_project_path", "")
-
-            for item in self.ui.listWidget_Firma.findItems("", Qt.MatchContains):
-                if item.text() in firma:
-                    item.setSelected(True)
-            for item in self.ui.listWidget_Leerohr.findItems("", Qt.MatchContains):
-                text = item.text()
-                id_start = text.find("(ID: ") + 5
-                id_end = text.find(")", id_start)
-                if id_start > 4 and id_end > id_start:
-                    id_value = text[id_start:id_end]
-                    if id_value in codierung_leerrohr:
-                        item.setSelected(True)
-            for item in self.ui.listWidget_Buendel.findItems("", Qt.MatchContains):
-                text = item.text()
-                id_start = text.find("(ID: ") + 5
-                id_end = text.find(")", id_start)
-                if id_start > 4 and id_end > id_start:
-                    id_value = text[id_start:id_end]
-                    if id_value in codierung_buendel:
-                        item.setSelected(True)
-            for item in self.ui.listWidget_Faser.findItems("", Qt.MatchContains):
-                text = item.text()
-                id_start = text.find("(ID: ") + 5
-                id_end = text.find(")", id_start)
-                if id_start > 4 and id_end > id_start:
-                    id_value = text[id_start:id_end]
-                    if id_value in codierung_faser:
-                        item.setSelected(True)
-            for item in self.ui.listWidget_Eigner.findItems("", Qt.MatchContains):
-                if item.text() in eigner:
-                    item.setSelected(True)
-            self.ui.comboBox_Auftraggeber.setCurrentText(auftraggeber)
-            self.update_auftraggeber_label(auftraggeber)
-            if hasattr(self.ui, 'lineEdit_Name'):
-                self.ui.lineEdit_Name.setText(name)
+            # Automatisch verbinden und offen halten
+            db_params = self.get_database_connection(username, password, umgebung)
             try:
-                self.ui.mQgsFileWidget.setFilePath(self.current_qgis_project_path)
-            except AttributeError as e:
-                QgsMessageLog.logMessage(f"Fehler beim Setzen von mQgsFileWidget: {e}", "SetupTool", Qgis.Critical)
+                self.conn = psycopg2.connect(**db_params)
+                self.is_connected = True
+                self.ui.pushButton_Verbindung.setStyleSheet("background-color: #90EE90;")
+                self.iface.messageBar().pushMessage("Erfolg", f"Automatische Verbindung zu {umgebung} hergestellt!", level=Qgis.Success)
 
-            # Subtypen nachladen
-            self.update_leerrohr_subtyp()
-            for item in self.ui.listWidget_Leerohr_SubTyp.findItems("", Qt.MatchContains):
+                # Cache befüllen
+                self.data_cache = {
+                    "firma": [],
+                    "codierung_leerrohr": [],
+                    "codierung_buendel": [],
+                    "codierung_faser": [],
+                    "auftraggeber": [],
+                    "eigner": ["Gemeinde", "TIWAG", "TIGAS"],
+                    "leerohr_subtyp": []
+                }
                 try:
-                    subtyp_id = int(item.text().split(" - ")[0])
-                    if subtyp_id in leerohr_subtyp:
+                    cur = self.conn.cursor()
+                    # Firma
+                    cur.execute("SELECT DISTINCT \"FIRMA\" FROM lwl.\"LUT_Leerrohr_SubTyp\" ORDER BY \"FIRMA\"")
+                    result = cur.fetchall()
+                    self.data_cache["firma"] = [row[0] for row in result if row[0]]
+                    QgsMessageLog.logMessage(f"Firma Cache: {self.data_cache['firma']} (Rows: {len(result)})", "SetupTool", Qgis.Info)
+                    # Codierung Leerrohr
+                    cur.execute("SELECT \"CODIERUNG\", \"BEMERKUNG\", \"id\" FROM lwl.\"LUT_Codierung\" WHERE \"ELEMENT\" LIKE '%Leerrohr%' ORDER BY \"BEMERKUNG\"")
+                    result = cur.fetchall()
+                    self.data_cache["codierung_leerrohr"] = [(row[0], row[1], row[2]) for row in result if row[1]]
+                    QgsMessageLog.logMessage(f"Leerrohr Codierung Cache: {self.data_cache['codierung_leerrohr']} (Rows: {len(result)})", "SetupTool", Qgis.Info)
+                    # Codierung Bündel
+                    cur.execute("SELECT \"CODIERUNG\", \"BEMERKUNG\", \"id\" FROM lwl.\"LUT_Codierung\" WHERE \"ELEMENT\" LIKE '%Bündel%' ORDER BY \"BEMERKUNG\"")
+                    result = cur.fetchall()
+                    self.data_cache["codierung_buendel"] = [(row[0], row[1], row[2]) for row in result if row[1]]
+                    QgsMessageLog.logMessage(f"Bündel Codierung Cache: {self.data_cache['codierung_buendel']} (Rows: {len(result)})", "SetupTool", Qgis.Info)
+                    # Codierung Faser
+                    cur.execute("SELECT \"CODIERUNG\", \"BEMERKUNG\", \"id\" FROM lwl.\"LUT_Codierung\" WHERE \"ELEMENT\" LIKE '%Faser%' ORDER BY \"BEMERKUNG\"")
+                    result = cur.fetchall()
+                    self.data_cache["codierung_faser"] = [(row[0], row[1], row[2]) for row in result if row[1]]
+                    QgsMessageLog.logMessage(f"Faser Codierung Cache: {self.data_cache['codierung_faser']} (Rows: {len(result)})", "SetupTool", Qgis.Info)
+                    # Auftraggeber
+                    cur.execute("SELECT \"BEZEICHNUNG\" FROM \"Verwaltung_Intern\".\"Auftraggeber\" ORDER BY \"BEZEICHNUNG\"")
+                    result = cur.fetchall()
+                    self.data_cache["auftraggeber"] = [row[0] for row in result if row[0]]
+                    QgsMessageLog.logMessage(f"Auftraggeber Cache: {self.data_cache['auftraggeber']} (Rows: {len(result)})", "SetupTool", Qgis.Info)
+                    # Leerrohr-Subtyp
+                    cur.execute("""
+                        SELECT s.id, s."ID_TYP", s."SUBTYP_char", c."CODIERUNG", c."BEMERKUNG", c."id" AS codierung_id
+                        FROM lwl."LUT_Leerrohr_SubTyp" s
+                        JOIN lwl."LUT_Codierung" c ON s."ID_CODIERUNG" = c."id"
+                        ORDER BY s.id
+                    """)
+                    result = cur.fetchall()
+                    self.data_cache["leerohr_subtyp"] = [(row[0], row[1], row[2], row[3], row[4], row[5]) for row in result]
+                    QgsMessageLog.logMessage(f"Leerrohr-Subtyp Cache: {self.data_cache['leerohr_subtyp']} (Rows: {len(result)})", "SetupTool", Qgis.Info)
+                    cur.close()
+                    if not any(self.data_cache[key] for key in self.data_cache if key != "eigner"):
+                        QgsMessageLog.logMessage("Kritischer Fehler: Keine Cache-Daten geladen!", "SetupTool", Qgis.Critical)
+                        self.iface.messageBar().pushMessage("Fehler", "Keine Daten für Cache geladen. Überprüfen Sie DB-Zugriff!", level=Qgis.Critical)
+                    else:
+                        QgsMessageLog.logMessage(f"Cache erfolgreich befüllt: {self.data_cache}", "SetupTool", Qgis.Info)
+                except Exception as e:
+                    QgsMessageLog.logMessage(f"Kritischer Fehler beim Befüllen des Caches: {e}", "SetupTool", Qgis.Critical)
+                    self.iface.messageBar().pushMessage("Fehler", f"Cache-Befüllung fehlgeschlagen: {e}", level=Qgis.Critical)
+                    return  # Beende, wenn Cache fehlschlägt, um UI nicht zu befüllen
+
+                # Befülle UI-Elemente aus Cache
+                self.populate_firma()
+                self.populate_codierung_leerrohr()
+                self.populate_auftraggeber()
+                self.populate_codierung_buendel()
+                self.populate_codierung_faser()
+                self.populate_eigner()
+                self.load_configurations()
+                self.update_leerrohr_subtyp()
+                self.update_setup_label()
+                self.update_qgis_project_label()
+
+                # Stelle gespeicherte Auswahl wieder her
+                firma = self.settings.value("firma", "").split(", ") if self.settings.value("firma", "") else []
+                codierung_leerrohr = self.settings.value("codierung_leerrohr", "").split(", ") if self.settings.value("codierung_leerrohr", "") else []
+                codierung_buendel = self.settings.value("codierung_buendel", "").split(", ") if self.settings.value("codierung_buendel", "") else []
+                codierung_faser = self.settings.value("codierung_faser", "").split(", ") if self.settings.value("codierung_faser", "") else []
+                eigner = self.settings.value("eigner", "").split(", ") if self.settings.value("eigner", "") else []
+                auftraggeber = self.settings.value("auftraggeber", "")
+                leerohr_subtyp = [int(x) for x in self.settings.value("leerohr_subtyp", []) if x] if self.settings.value("leerohr_subtyp", []) else []
+                name = self.settings.value("name", "")
+                self.current_qgis_project_path = self.settings.value("qgis_project_path", "")
+
+                for item in self.ui.listWidget_Firma.findItems("", Qt.MatchContains):
+                    if item.text() in firma:
                         item.setSelected(True)
-                except ValueError:
-                    continue
+                for item in self.ui.listWidget_Leerohr.findItems("", Qt.MatchContains):
+                    text = item.text()
+                    id_start = text.find("(ID: ") + 5
+                    id_end = text.find(")", id_start)
+                    if id_start > 4 and id_end > id_start:
+                        id_value = text[id_start:id_end]
+                        if id_value in codierung_leerrohr:
+                            item.setSelected(True)
+                for item in self.ui.listWidget_Buendel.findItems("", Qt.MatchContains):
+                    text = item.text()
+                    id_start = text.find("(ID: ") + 5
+                    id_end = text.find(")", id_start)
+                    if id_start > 4 and id_end > id_start:
+                        id_value = text[id_start:id_end]
+                        if id_value in codierung_buendel:
+                            item.setSelected(True)
+                for item in self.ui.listWidget_Faser.findItems("", Qt.MatchContains):
+                    text = item.text()
+                    id_start = text.find("(ID: ") + 5
+                    id_end = text.find(")", id_start)
+                    if id_start > 4 and id_end > id_start:
+                        id_value = text[id_start:id_end]
+                        if id_value in codierung_faser:
+                            item.setSelected(True)
+                for item in self.ui.listWidget_Eigner.findItems("", Qt.MatchContains):
+                    if item.text() in eigner:
+                        item.setSelected(True)
+                self.ui.comboBox_Auftraggeber.setCurrentText(auftraggeber)
+                self.update_auftraggeber_label(auftraggeber)
+                if hasattr(self.ui, 'lineEdit_Name'):
+                    self.ui.lineEdit_Name.setText(name)
+                try:
+                    self.ui.mQgsFileWidget.setFilePath(self.current_qgis_project_path)
+                except AttributeError as e:
+                    QgsMessageLog.logMessage(f"Fehler beim Setzen von mQgsFileWidget: {e}", "SetupTool", Qgis.Critical)
+
+                # Subtypen nachladen
+                self.update_leerrohr_subtyp()
+                for item in self.ui.listWidget_Leerohr_SubTyp.findItems("", Qt.MatchContains):
+                    try:
+                        subtyp_id = int(item.text().split(" - ")[0])
+                        if subtyp_id in leerohr_subtyp:
+                            item.setSelected(True)
+                    except ValueError:
+                        continue
+            except Exception as e:
+                self.is_connected = False
+                self.conn = None
+                self.ui.pushButton_Verbindung.setStyleSheet("background-color: #FF6347;")
+                QgsMessageLog.logMessage(f"Automatischer Verbindungsfehler zu {umgebung}: {e}", "SetupTool", Qgis.Critical)
+                self.iface.messageBar().pushMessage("Fehler", f"Automatische Verbindung fehlgeschlagen: {e}", level=Qgis.Critical)
+                # UI leer lassen
+                self.ui.pushButton_Verbindung.setStyleSheet("background-color: gray;")
+                self.ui.label_Kommentar_3.clear()
+                self.ui.label_Kommentar_5.clear()
+                self.ui.comboBox_Auftraggeber.clear()
+                self.ui.listWidget_Firma.clear()
+                self.ui.listWidget_Leerohr.clear()
+                self.ui.listWidget_Buendel.clear()
+                self.ui.listWidget_Faser.clear()
+                self.ui.listWidget_Eigner.clear()
+                self.ui.listWidget_Leerohr_SubTyp.clear()
+                self.ui.tableView.setModel(None)
+                try:
+                    self.ui.mQgsFileWidget.setFilePath("")
+                    self.current_qgis_project_path = ""
+                except AttributeError as e:
+                    QgsMessageLog.logMessage(f"Fehler beim Zurücksetzen von mQgsFileWidget: {e}", "SetupTool", Qgis.Critical)
+                self.update_qgis_project_label()
         else:
+            # Keine gespeicherte Verbindung – leer bleiben
             self.ui.pushButton_Verbindung.setStyleSheet("background-color: gray;")
             self.ui.label_Kommentar_3.clear()
             self.ui.label_Kommentar_5.clear()
-            self.ui.comboBox_Auftraggeber.setCurrentIndex(-1)
+            self.ui.comboBox_Auftraggeber.clear()
             self.ui.listWidget_Firma.clear()
             self.ui.listWidget_Leerohr.clear()
             self.ui.listWidget_Buendel.clear()
@@ -306,43 +393,15 @@ class SetupTool(QDialog):
             self.ui.listWidget_Leerohr_SubTyp.clear()
             self.iface.messageBar().pushMessage("Info", "Bitte stellen Sie eine Verbindung her, um Subtypen zu laden.", level=Qgis.Info)
             return
-        username = self.ui.label_Kommentar_3.text()
-        password = self.ui.label_Kommentar_5.text()
-        umgebung = self.ui.comboBox_Umgebung.currentText()
-        if not username or not password or not umgebung:
-            self.ui.listWidget_Leerohr_SubTyp.clear()
-            self.iface.messageBar().pushMessage("Info", "Bitte stellen Sie eine Verbindung her, um Subtypen zu laden.", level=Qgis.Info)
-            return
-        db_params = self.get_database_connection(username, password, umgebung)
         try:
-            conn = psycopg2.connect(**db_params)
-            cur = conn.cursor()
-            query = """
-                SELECT s.id, s."ID_TYP", s."SUBTYP_char", c."CODIERUNG", c."BEMERKUNG", c."id" AS codierung_id
-                FROM lwl."LUT_Leerrohr_SubTyp" s
-                JOIN lwl."LUT_Codierung" c ON s."ID_CODIERUNG" = c."id"
-            """
-            params = []
-            if selected_firmen or selected_leerrohr_ids:
-                conditions = []
-                if selected_firmen:
-                    conditions.append(f"s.\"FIRMA\" IN ({','.join(['%s'] * len(selected_firmen))})")
-                    params.extend(selected_firmen)
-                if selected_leerrohr_ids:
-                    conditions.append(f"s.\"ID_CODIERUNG\" IN ({','.join(['%s'] * len(selected_leerrohr_ids))})")
-                    params.extend(selected_leerrohr_ids)
-                if conditions:
-                    query += " WHERE " + " AND ".join(conditions)
-            query += " ORDER BY s.id"
-            cur.execute(query, params)
-            subtypen = cur.fetchall()
-
             subtyp_items = []
-            for subtyp in subtypen:
+            for subtyp in self.data_cache["leerohr_subtyp"]:
                 subtyp_id, typ_nummer, subtyp_char, codierung, bemerkung, codierung_id = subtyp
-                codierung_text = f"{codierung} - {bemerkung} (ID: {codierung_id})"
-                subtyp_items.append(f"{subtyp_id} - {typ_nummer} - {subtyp_char} - {codierung_text}")
-            
+                if (not selected_firmen or subtyp[0] in [s[0] for s in self.data_cache["leerohr_subtyp"] if s[0]]) and \
+                (not selected_leerrohr_ids or codierung_id in selected_leerrohr_ids):
+                    codierung_text = f"{codierung} - {bemerkung} (ID: {codierung_id})"
+                    subtyp_items.append(f"{subtyp_id} - {typ_nummer} - {subtyp_char} - {codierung_text}")
+
             self.ui.listWidget_Leerohr_SubTyp.clear()
             self.ui.listWidget_Leerohr_SubTyp.addItems(subtyp_items)
             self.ui.listWidget_Leerohr_SubTyp.setSelectionMode(QListWidget.MultiSelection)
@@ -354,14 +413,10 @@ class SetupTool(QDialog):
                         item.setSelected(True)
                 except ValueError:
                     continue
-            QgsMessageLog.logMessage(f"Loaded subtypen: {subtyp_items}", "SetupTool", Qgis.Info)
+            QgsMessageLog.logMessage(f"Loaded subtypen from cache: {subtyp_items}", "SetupTool", Qgis.Info)
         except Exception as e:
-            QgsMessageLog.logMessage(f"Fehler Subtypen: {e}", "SetupTool", level=Qgis.Critical)
+            QgsMessageLog.logMessage(f"Fehler beim Laden der Subtypen aus Cache: {e}", "SetupTool", Qgis.Critical)
             self.iface.messageBar().pushMessage("Fehler", f"Laden der Subtypen fehlgeschlagen: {e}", level=Qgis.Critical)
-        finally:
-            if 'conn' in locals():
-                cur.close()
-                conn.close()
 
     def update_codierung_from_subtyp(self):
         """Aktualisiert die Codierungen basierend auf den gewählten Leerrohr-Subtypen."""
@@ -482,8 +537,10 @@ class SetupTool(QDialog):
         umgebung = self.ui.comboBox_Umgebung.currentText()
         db_params = self.get_database_connection(username, password, umgebung)
         try:
-            conn = psycopg2.connect(**db_params)
-            conn.close()
+            # Verbindung öffnen und offen halten
+            if self.conn:
+                self.conn.close()
+            self.conn = psycopg2.connect(**db_params)
             self.is_connected = True
             self.ui.pushButton_Verbindung.setStyleSheet("background-color: #90EE90;")
             self.iface.messageBar().pushMessage("Erfolg", f"Verbindung zu {umgebung} hergestellt!", level=Qgis.Success)
@@ -493,11 +550,93 @@ class SetupTool(QDialog):
             self.settings.setValue("connection_password", base64.b64encode(password.encode()).decode())
             self.settings.setValue("connection_umgebung", umgebung)
 
-            self.populate_firma(username, password, umgebung)
-            self.populate_codierung_leerrohr(username, password, umgebung)
-            self.populate_auftraggeber(username, password, umgebung)
-            self.populate_codierung_buendel(username, password, umgebung)
-            self.populate_codierung_faser(username, password, umgebung)
+            # Daten in Cache laden
+            self.data_cache = {
+                "firma": [],
+                "codierung_leerrohr": [],
+                "codierung_buendel": [],
+                "codierung_faser": [],
+                "auftraggeber": [],
+                "eigner": ["Gemeinde", "TIWAG", "TIGAS"],
+                "leerohr_subtyp": []
+            }
+            try:
+                cur = self.conn.cursor()
+                # Firma
+                try:
+                    cur.execute("SELECT DISTINCT \"FIRMA\" FROM lwl.\"LUT_Leerrohr_SubTyp\" ORDER BY \"FIRMA\"")
+                    result = cur.fetchall()
+                    self.data_cache["firma"] = [row[0] for row in result if row[0]]
+                    QgsMessageLog.logMessage(f"Firma Cache: {self.data_cache['firma']} (Rows: {len(result)})", "SetupTool", Qgis.Info)
+                except Exception as e:
+                    QgsMessageLog.logMessage(f"Fehler bei Firma-Abfrage: {e}", "SetupTool", Qgis.Critical)
+                    self.data_cache["firma"] = []
+                # Codierung Leerrohr
+                try:
+                    cur.execute("SELECT \"CODIERUNG\", \"BEMERKUNG\", \"id\" FROM lwl.\"LUT_Codierung\" WHERE \"ELEMENT\" LIKE '%Leerrohr%' ORDER BY \"BEMERKUNG\"")
+                    result = cur.fetchall()
+                    self.data_cache["codierung_leerrohr"] = [(row[0], row[1], row[2]) for row in result if row[1]]
+                    QgsMessageLog.logMessage(f"Leerrohr Codierung Cache: {self.data_cache['codierung_leerrohr']} (Rows: {len(result)})", "SetupTool", Qgis.Info)
+                except Exception as e:
+                    QgsMessageLog.logMessage(f"Fehler bei Leerrohr-Codierung-Abfrage: {e}", "SetupTool", Qgis.Critical)
+                    self.data_cache["codierung_leerrohr"] = []
+                # Codierung Bündel
+                try:
+                    cur.execute("SELECT \"CODIERUNG\", \"BEMERKUNG\", \"id\" FROM lwl.\"LUT_Codierung\" WHERE \"ELEMENT\" LIKE '%Bündel%' ORDER BY \"BEMERKUNG\"")
+                    result = cur.fetchall()
+                    self.data_cache["codierung_buendel"] = [(row[0], row[1], row[2]) for row in result if row[1]]
+                    QgsMessageLog.logMessage(f"Bündel Codierung Cache: {self.data_cache['codierung_buendel']} (Rows: {len(result)})", "SetupTool", Qgis.Info)
+                except Exception as e:
+                    QgsMessageLog.logMessage(f"Fehler bei Bündel-Codierung-Abfrage: {e}", "SetupTool", Qgis.Critical)
+                    self.data_cache["codierung_buendel"] = []
+                # Codierung Faser
+                try:
+                    cur.execute("SELECT \"CODIERUNG\", \"BEMERKUNG\", \"id\" FROM lwl.\"LUT_Codierung\" WHERE \"ELEMENT\" LIKE '%Faser%' ORDER BY \"BEMERKUNG\"")
+                    result = cur.fetchall()
+                    self.data_cache["codierung_faser"] = [(row[0], row[1], row[2]) for row in result if row[1]]
+                    QgsMessageLog.logMessage(f"Faser Codierung Cache: {self.data_cache['codierung_faser']} (Rows: {len(result)})", "SetupTool", Qgis.Info)
+                except Exception as e:
+                    QgsMessageLog.logMessage(f"Fehler bei Faser-Codierung-Abfrage: {e}", "SetupTool", Qgis.Critical)
+                    self.data_cache["codierung_faser"] = []
+                # Auftraggeber
+                try:
+                    cur.execute("SELECT \"BEZEICHNUNG\" FROM \"Verwaltung_Intern\".\"Auftraggeber\" ORDER BY \"BEZEICHNUNG\"")
+                    result = cur.fetchall()
+                    self.data_cache["auftraggeber"] = [row[0] for row in result if row[0]]
+                    QgsMessageLog.logMessage(f"Auftraggeber Cache: {self.data_cache['auftraggeber']} (Rows: {len(result)})", "SetupTool", Qgis.Info)
+                except Exception as e:
+                    QgsMessageLog.logMessage(f"Fehler bei Auftraggeber-Abfrage: {e}", "SetupTool", Qgis.Critical)
+                    self.data_cache["auftraggeber"] = []
+                # Leerrohr-Subtyp
+                try:
+                    cur.execute("""
+                        SELECT s.id, s."ID_TYP", s."SUBTYP_char", c."CODIERUNG", c."BEMERKUNG", c."id" AS codierung_id
+                        FROM lwl."LUT_Leerrohr_SubTyp" s
+                        JOIN lwl."LUT_Codierung" c ON s."ID_CODIERUNG" = c."id"
+                        ORDER BY s.id
+                    """)
+                    result = cur.fetchall()
+                    self.data_cache["leerohr_subtyp"] = [(row[0], row[1], row[2], row[3], row[4], row[5]) for row in result]
+                    QgsMessageLog.logMessage(f"Leerrohr-Subtyp Cache: {self.data_cache['leerohr_subtyp']} (Rows: {len(result)})", "SetupTool", Qgis.Info)
+                except Exception as e:
+                    QgsMessageLog.logMessage(f"Fehler bei Leerrohr-Subtyp-Abfrage: {e}", "SetupTool", Qgis.Critical)
+                    self.data_cache["leerohr_subtyp"] = []
+                cur.close()
+                if not any(self.data_cache[key] for key in self.data_cache if key != "eigner"):
+                    QgsMessageLog.logMessage("Kritischer Fehler: Keine Cache-Daten geladen!", "SetupTool", Qgis.Critical)
+                    self.iface.messageBar().pushMessage("Fehler", "Keine Daten für Cache geladen. Überprüfen Sie DB-Zugriff!", level=Qgis.Critical)
+                else:
+                    QgsMessageLog.logMessage(f"Cache erfolgreich befüllt: {self.data_cache}", "SetupTool", Qgis.Info)
+            except Exception as e:
+                QgsMessageLog.logMessage(f"Kritischer Fehler beim Befüllen des Caches: {e}", "SetupTool", Qgis.Critical)
+                self.iface.messageBar().pushMessage("Fehler", f"Cache-Befüllung fehlgeschlagen: {e}", level=Qgis.Critical)
+
+            # Befülle UI-Elemente aus Cache
+            self.populate_firma()
+            self.populate_codierung_leerrohr()
+            self.populate_auftraggeber()
+            self.populate_codierung_buendel()
+            self.populate_codierung_faser()
             self.populate_eigner()
             self.load_configurations()
             self.update_leerrohr_subtyp()
@@ -505,6 +644,7 @@ class SetupTool(QDialog):
             self.update_qgis_project_label()
         except Exception as e:
             self.is_connected = False
+            self.conn = None
             self.ui.pushButton_Verbindung.setStyleSheet("background-color: #FF6347;")
             QgsMessageLog.logMessage(f"Verbindungsfehler zu {umgebung}: {e}", "SetupTool", Qgis.Critical)
             self.iface.messageBar().pushMessage("Fehler", f"Verbindung fehlgeschlagen: {e}", level=Qgis.Critical)
@@ -514,123 +654,110 @@ class SetupTool(QDialog):
             self.ui.listWidget_Firma.clear()
             return
         try:
-            db_params = self.get_database_connection(username, password, umgebung)
-            conn = psycopg2.connect(**db_params)
-            cur = conn.cursor()
-            cur.execute("SELECT DISTINCT \"FIRMA\" FROM lwl.\"LUT_Leerrohr_SubTyp\" ORDER BY \"FIRMA\"")
-            firmen = [row[0] for row in cur.fetchall() if row[0]]
+            if "firma" not in self.data_cache:
+                raise KeyError("firma")
             self.ui.listWidget_Firma.clear()
-            self.ui.listWidget_Firma.addItems(firmen)
+            self.ui.listWidget_Firma.addItems(self.data_cache["firma"])
             self.ui.listWidget_Firma.setSelectionMode(QListWidget.MultiSelection)
-            QgsMessageLog.logMessage(f"Loaded firms: {firmen}", "SetupTool", Qgis.Info)
+            QgsMessageLog.logMessage(f"Loaded firms from cache: {self.data_cache['firma']}", "SetupTool", Qgis.Info)
+        except KeyError as e:
+            QgsMessageLog.logMessage(f"Cache-Schlüssel fehlt: {e}", "SetupTool", Qgis.Critical)
+            self.iface.messageBar().pushMessage("Fehler", f"Laden der Firmen aus Cache fehlgeschlagen: Schlüssel {e} nicht gefunden", level=Qgis.Critical)
         except Exception as e:
-            QgsMessageLog.logMessage(f"Fehler Firmen: {e}", "SetupTool", level=Qgis.Critical)
+            QgsMessageLog.logMessage(f"Fehler beim Laden der Firmen aus Cache: {e}", "SetupTool", Qgis.Critical)
             self.iface.messageBar().pushMessage("Fehler", f"Laden der Firmen fehlgeschlagen: {e}", level=Qgis.Critical)
-        finally:
-            if 'conn' in locals():
-                cur.close()
-                conn.close()
 
     def populate_codierung_leerrohr(self, username=None, password=None, umgebung=None):
         if not self.is_connected:
             self.ui.listWidget_Leerohr.clear()
             return
         try:
-            db_params = self.get_database_connection(username, password, umgebung)
-            conn = psycopg2.connect(**db_params)
-            cur = conn.cursor()
-            cur.execute("SELECT \"CODIERUNG\", \"BEMERKUNG\", \"id\" FROM lwl.\"LUT_Codierung\" WHERE \"ELEMENT\" LIKE '%Leerrohr%' ORDER BY \"BEMERKUNG\"")
-            codierungen = [f"{row[0]} - {row[1]} (ID: {row[2]})" for row in cur.fetchall() if row[1]]
+            if "codierung_leerrohr" not in self.data_cache:
+                raise KeyError("codierung_leerrohr")
             self.ui.listWidget_Leerohr.clear()
+            codierungen = [f"{row[0]} - {row[1]} (ID: {row[2]})" for row in self.data_cache["codierung_leerrohr"]]
             self.ui.listWidget_Leerohr.addItems(codierungen)
             self.ui.listWidget_Leerohr.setSelectionMode(QListWidget.MultiSelection)
-            QgsMessageLog.logMessage(f"Loaded leerohr codings: {codierungen}", "SetupTool", Qgis.Info)
+            QgsMessageLog.logMessage(f"Loaded leerohr codings from cache: {codierungen}", "SetupTool", Qgis.Info)
+        except KeyError as e:
+            QgsMessageLog.logMessage(f"Cache-Schlüssel fehlt: {e}", "SetupTool", Qgis.Critical)
+            self.iface.messageBar().pushMessage("Fehler", f"Laden der Leerrohr-Codierungen aus Cache fehlgeschlagen: Schlüssel {e} nicht gefunden", level=Qgis.Critical)
         except Exception as e:
-            QgsMessageLog.logMessage(f"Fehler Codierung Leerohr: {e}", "SetupTool", level=Qgis.Critical)
+            QgsMessageLog.logMessage(f"Fehler beim Laden der Leerrohr-Codierungen aus Cache: {e}", "SetupTool", Qgis.Critical)
             self.iface.messageBar().pushMessage("Fehler", f"Laden der Leerrohr-Codierungen fehlgeschlagen: {e}", level=Qgis.Critical)
-        finally:
-            if 'conn' in locals():
-                cur.close()
-                conn.close()
-
-    def populate_auftraggeber(self, username=None, password=None, umgebung=None):
-        if not self.is_connected:
-            self.ui.comboBox_Auftraggeber.clear()
-            return
-        try:
-            db_params = self.get_database_connection(username, password, umgebung)
-            conn = psycopg2.connect(**db_params)
-            cur = conn.cursor()
-            cur.execute("SELECT \"BEZEICHNUNG\" FROM \"Verwaltung_Intern\".\"Auftraggeber\" ORDER BY \"BEZEICHNUNG\"")
-            auftraggeber = [row[0] for row in cur.fetchall() if row[0]]
-            self.ui.comboBox_Auftraggeber.clear()
-            self.ui.comboBox_Auftraggeber.addItems(auftraggeber)
-            self.update_auftraggeber_label(self.ui.comboBox_Auftraggeber.currentText())
-            QgsMessageLog.logMessage(f"Loaded auftraggeber: {auftraggeber}", "SetupTool", Qgis.Info)
-        except Exception as e:
-            QgsMessageLog.logMessage(f"Fehler Auftraggeber: {e}", "SetupTool", level=Qgis.Critical)
-            self.iface.messageBar().pushMessage("Fehler", f"Laden der Auftraggeber fehlgeschlagen: {e}", level=Qgis.Critical)
-        finally:
-            if 'conn' in locals():
-                cur.close()
-                conn.close()
 
     def populate_codierung_buendel(self, username=None, password=None, umgebung=None):
         if not self.is_connected:
             self.ui.listWidget_Buendel.clear()
             return
         try:
-            db_params = self.get_database_connection(username, password, umgebung)
-            conn = psycopg2.connect(**db_params)
-            cur = conn.cursor()
-            cur.execute("SELECT \"CODIERUNG\", \"BEMERKUNG\", \"id\" FROM lwl.\"LUT_Codierung\" WHERE \"ELEMENT\" LIKE '%Bündel%' ORDER BY \"BEMERKUNG\"")
-            codierungen = [f"{row[0]} - {row[1]} (ID: {row[2]})" for row in cur.fetchall() if row[1]]
+            if "codierung_buendel" not in self.data_cache:
+                raise KeyError("codierung_buendel")
             self.ui.listWidget_Buendel.clear()
+            codierungen = [f"{row[0]} - {row[1]} (ID: {row[2]})" for row in self.data_cache["codierung_buendel"]]
             self.ui.listWidget_Buendel.addItems(codierungen)
             self.ui.listWidget_Buendel.setSelectionMode(QListWidget.MultiSelection)
-            QgsMessageLog.logMessage(f"Loaded buendel codings: {codierungen}", "SetupTool", Qgis.Info)
+            QgsMessageLog.logMessage(f"Loaded buendel codings from cache: {codierungen}", "SetupTool", Qgis.Info)
+        except KeyError as e:
+            QgsMessageLog.logMessage(f"Cache-Schlüssel fehlt: {e}", "SetupTool", Qgis.Critical)
+            self.iface.messageBar().pushMessage("Fehler", f"Laden der Bündel-Codierungen aus Cache fehlgeschlagen: Schlüssel {e} nicht gefunden", level=Qgis.Critical)
         except Exception as e:
-            QgsMessageLog.logMessage(f"Fehler Codierung Buendel: {e}", "SetupTool", level=Qgis.Critical)
+            QgsMessageLog.logMessage(f"Fehler beim Laden der Bündel-Codierungen aus Cache: {e}", "SetupTool", Qgis.Critical)
             self.iface.messageBar().pushMessage("Fehler", f"Laden der Bündel-Codierungen fehlgeschlagen: {e}", level=Qgis.Critical)
-        finally:
-            if 'conn' in locals():
-                cur.close()
-                conn.close()
 
     def populate_codierung_faser(self, username=None, password=None, umgebung=None):
         if not self.is_connected:
             self.ui.listWidget_Faser.clear()
             return
         try:
-            db_params = self.get_database_connection(username, password, umgebung)
-            conn = psycopg2.connect(**db_params)
-            cur = conn.cursor()
-            cur.execute("SELECT \"CODIERUNG\", \"BEMERKUNG\", \"id\" FROM lwl.\"LUT_Codierung\" WHERE \"ELEMENT\" LIKE '%Faser%' ORDER BY \"BEMERKUNG\"")
-            codierungen = [f"{row[0]} - {row[1]} (ID: {row[2]})" for row in cur.fetchall() if row[1]]
+            if "codierung_faser" not in self.data_cache:
+                raise KeyError("codierung_faser")
             self.ui.listWidget_Faser.clear()
+            codierungen = [f"{row[0]} - {row[1]} (ID: {row[2]})" for row in self.data_cache["codierung_faser"]]
             self.ui.listWidget_Faser.addItems(codierungen)
             self.ui.listWidget_Faser.setSelectionMode(QListWidget.MultiSelection)
-            QgsMessageLog.logMessage(f"Loaded faser codings: {codierungen}", "SetupTool", Qgis.Info)
+            QgsMessageLog.logMessage(f"Loaded faser codings from cache: {codierungen}", "SetupTool", Qgis.Info)
+        except KeyError as e:
+            QgsMessageLog.logMessage(f"Cache-Schlüssel fehlt: {e}", "SetupTool", Qgis.Critical)
+            self.iface.messageBar().pushMessage("Fehler", f"Laden der Faser-Codierungen aus Cache fehlgeschlagen: Schlüssel {e} nicht gefunden", level=Qgis.Critical)
         except Exception as e:
-            QgsMessageLog.logMessage(f"Fehler Codierung Faser: {e}", "SetupTool", level=Qgis.Critical)
+            QgsMessageLog.logMessage(f"Fehler beim Laden der Faser-Codierungen aus Cache: {e}", "SetupTool", Qgis.Critical)
             self.iface.messageBar().pushMessage("Fehler", f"Laden der Faser-Codierungen fehlgeschlagen: {e}", level=Qgis.Critical)
-        finally:
-            if 'conn' in locals():
-                cur.close()
-                conn.close()
+
+    def populate_auftraggeber(self, username=None, password=None, umgebung=None):
+        if not self.is_connected:
+            self.ui.comboBox_Auftraggeber.clear()
+            return
+        try:
+            if "auftraggeber" not in self.data_cache:
+                raise KeyError("auftraggeber")
+            self.ui.comboBox_Auftraggeber.clear()
+            self.ui.comboBox_Auftraggeber.addItems(self.data_cache["auftraggeber"])
+            self.update_auftraggeber_label(self.ui.comboBox_Auftraggeber.currentText())
+            QgsMessageLog.logMessage(f"Loaded auftraggeber from cache: {self.data_cache['auftraggeber']}", "SetupTool", Qgis.Info)
+        except KeyError as e:
+            QgsMessageLog.logMessage(f"Cache-Schlüssel fehlt: {e}", "SetupTool", Qgis.Critical)
+            self.iface.messageBar().pushMessage("Fehler", f"Laden der Auftraggeber aus Cache fehlgeschlagen: Schlüssel {e} nicht gefunden", level=Qgis.Critical)
+        except Exception as e:
+            QgsMessageLog.logMessage(f"Fehler beim Laden der Auftraggeber aus Cache: {e}", "SetupTool", Qgis.Critical)
+            self.iface.messageBar().pushMessage("Fehler", f"Laden der Auftraggeber fehlgeschlagen: {e}", level=Qgis.Critical)
 
     def populate_eigner(self):
         if not self.is_connected:
             self.ui.listWidget_Eigner.clear()
             return
         try:
-            eigner = ["Gemeinde", "TIWAG", "TIGAS"]
+            if "eigner" not in self.data_cache:
+                raise KeyError("eigner")
             self.ui.listWidget_Eigner.clear()
-            self.ui.listWidget_Eigner.addItems(eigner)
+            self.ui.listWidget_Eigner.addItems(self.data_cache["eigner"])
             self.ui.listWidget_Eigner.setSelectionMode(QListWidget.MultiSelection)
-            QgsMessageLog.logMessage(f"Loaded eigner: {eigner}", "SetupTool", Qgis.Info)
+            QgsMessageLog.logMessage(f"Loaded eigner from cache: {self.data_cache['eigner']}", "SetupTool", Qgis.Info)
+        except KeyError as e:
+            QgsMessageLog.logMessage(f"Cache-Schlüssel fehlt: {e}", "SetupTool", Qgis.Critical)
+            self.iface.messageBar().pushMessage("Fehler", f"Laden der Eigner aus Cache fehlgeschlagen: Schlüssel {e} nicht gefunden", level=Qgis.Critical)
         except Exception as e:
-            QgsMessageLog.logMessage(f"Fehler Eigner: {e}", "SetupTool", level=Qgis.Critical)
+            QgsMessageLog.logMessage(f"Fehler beim Laden der Eigner aus Cache: {e}", "SetupTool", Qgis.Critical)
             self.iface.messageBar().pushMessage("Fehler", f"Laden der Eigner fehlgeschlagen: {e}", level=Qgis.Critical)
 
     def populate_umgebung(self):
@@ -665,8 +792,7 @@ class SetupTool(QDialog):
         umgebung = self.ui.comboBox_Umgebung.currentText()
         db_params = self.get_database_connection(username, password, umgebung)
         try:
-            conn = psycopg2.connect(**db_params)
-            cur = conn.cursor()
+            cur = self.conn.cursor()
 
             selected_leerrohr_ids = []
             selected_buendel_ids = []
@@ -732,8 +858,16 @@ class SetupTool(QDialog):
             id_auftraggber = cur.fetchone()
             id_auftraggber = id_auftraggber[0] if id_auftraggber else None
 
-            if self.current_setup_id:
-                # Aktualisiere bestehenden Eintrag
+            # Prüfe, ob der Name eindeutig ist (außer für aktuelles Setup)
+            cur.execute("SELECT id FROM \"Verwaltung_Intern\".\"setup_toolbox\" WHERE name = %s AND id != %s", (name, self.current_setup_id if self.current_setup_id else 0))
+            existing_setup = cur.fetchone()
+            if existing_setup:
+                self.iface.messageBar().pushMessage("Fehler", f"Setup-Name '{name}' existiert bereits. Bitte wählen Sie einen anderen Namen.", level=Qgis.Critical)
+                cur.close()
+                return
+
+            if self.current_setup_id and name == self.settings.value("name", ""):
+                # Update bestehendes Setup, wenn Name unverändert
                 cur.execute("""
                     UPDATE "Verwaltung_Intern"."setup_toolbox"
                     SET "name" = %s, "firma" = %s, "codierung_leerrohr" = %s, "codierung_buendel" = %s,
@@ -741,28 +875,28 @@ class SetupTool(QDialog):
                         "leerohr_subtyp" = %s, "qgis_proj" = %s
                     WHERE id = %s
                 """, (name, firma, selected_leerrohr_ids, selected_buendel_ids, selected_faser_ids, id_auftraggber, eigner, db_connection_str, selected_subtyp_ids, qgis_project_path, self.current_setup_id))
-                conn.commit()
-                self.iface.messageBar().pushMessage("Erfolg", "Eintrag aktualisiert!", level=Qgis.Success)
+                self.conn.commit()
+                self.iface.messageBar().pushMessage("Erfolg", f"Setup '{name}' aktualisiert!", level=Qgis.Success)
             else:
-                # Erstelle neuen Eintrag
+                # Neues Setup anlegen (bei neuem Namen oder ohne current_setup_id)
                 cur.execute("""
                     INSERT INTO "Verwaltung_Intern"."setup_toolbox" ("name", "firma", "codierung_leerrohr", "codierung_buendel", "codierung_faser", "id_auftraggber", "eigner", "db_connection", "leerohr_subtyp", "qgis_proj")
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                 """, (name, firma, selected_leerrohr_ids, selected_buendel_ids, selected_faser_ids, id_auftraggber, eigner, db_connection_str, selected_subtyp_ids, qgis_project_path))
                 self.current_setup_id = cur.fetchone()[0]
-                conn.commit()
-                self.iface.messageBar().pushMessage("Erfolg", "Neuer Eintrag gespeichert!", level=Qgis.Success)
+                self.conn.commit()
+                self.iface.messageBar().pushMessage("Erfolg", f"Neues Setup '{name}' gespeichert!", level=Qgis.Success)
 
             self.load_configurations()
             self.update_qgis_project_label()
+            cur.close()
         except Exception as e:
             QgsMessageLog.logMessage(f"Fehler beim Speichern: {e}", "SetupTool", level=Qgis.Critical)
             self.iface.messageBar().pushMessage("Fehler", f"Speichern fehlgeschlagen: {e}", level=Qgis.Critical)
         finally:
-            if 'conn' in locals():
+            if 'cur' in locals():
                 cur.close()
-                conn.close()
 
     def delete_configuration(self):
         if not self.is_connected:
@@ -806,21 +940,12 @@ class SetupTool(QDialog):
                     conn.close()
 
     def load_configurations(self):
-        if not self.is_connected:
+        if not self.is_connected or not self.conn:
             self.ui.tableView.setModel(None)
             self.iface.messageBar().pushMessage("Info", "Bitte stellen Sie eine Verbindung her, um Konfigurationen zu laden.", level=Qgis.Info)
             return
-        username = self.ui.label_Kommentar_3.text()
-        password = self.ui.label_Kommentar_5.text()
-        umgebung = self.ui.comboBox_Umgebung.currentText()
-        if not username or not password or not umgebung:
-            self.ui.tableView.setModel(None)
-            self.iface.messageBar().pushMessage("Info", "Bitte stellen Sie eine Verbindung her, um Konfigurationen zu laden.", level=Qgis.Info)
-            return
-        db_params = self.get_database_connection(username, password, umgebung)
         try:
-            conn = psycopg2.connect(**db_params)
-            cur = conn.cursor()
+            cur = self.conn.cursor()
             cur.execute("SELECT id, name, id_auftraggber, firma, codierung_leerrohr, codierung_buendel, codierung_faser, eigner, leerohr_subtyp, qgis_proj FROM \"Verwaltung_Intern\".\"setup_toolbox\"")
             data = cur.fetchall()
             headers = ["ID", "Name", "Auftraggeber", "Firma", "Leerrohr-C", "Bündel-C", "Faser-C", "Eigner", "Leerohr-Subtyp"]
@@ -829,21 +954,17 @@ class SetupTool(QDialog):
             self.ui.tableView.resizeColumnsToContents()
             if self.ui.tableView is not None and self.ui.tableView.selectionModel() is not None:
                 self.ui.tableView.selectionModel().selectionChanged.connect(self.update_table_selection)
+            cur.close()
             QgsMessageLog.logMessage(f"Loaded configurations: {len(data)} entries", "SetupTool", Qgis.Info)
         except Exception as e:
-            QgsMessageLog.logMessage(f"Fehler beim Laden der Konfigurationen: {e}", "SetupTool", level=Qgis.Critical)
+            QgsMessageLog.logMessage(f"Fehler beim Laden der Konfigurationen: {e}", "SetupTool", Qgis.Critical)
             self.ui.tableView.setModel(None)
             self.iface.messageBar().pushMessage("Fehler", f"Laden der Konfigurationen fehlgeschlagen: {e}", level=Qgis.Critical)
-        finally:
-            if 'conn' in locals():
-                cur.close()
-                conn.close()
 
     def apply_configuration(self):
         if not self.is_connected:
             self.iface.messageBar().pushMessage("Fehler", "Bitte stellen Sie eine Verbindung her, um eine Konfiguration anzuwenden.", level=Qgis.Critical)
             return
-        # Prüfe zuerst, ob ein Setup über open_configuration oder save_settings geladen ist
         setup_id = None
         if self.current_setup_id:
             setup_id = self.current_setup_id
@@ -859,8 +980,7 @@ class SetupTool(QDialog):
         umgebung = self.ui.comboBox_Umgebung.currentText()
         db_params = self.get_database_connection(username, password, umgebung)
         try:
-            conn = psycopg2.connect(**db_params)
-            cur = conn.cursor()
+            cur = self.conn.cursor()
             cur.execute("SELECT firma, codierung_leerrohr, codierung_buendel, codierung_faser, id_auftraggber, eigner, name, db_connection, leerohr_subtyp, id, qgis_proj FROM \"Verwaltung_Intern\".\"setup_toolbox\" WHERE id = %s", (setup_id,))
             config = cur.fetchone()
             if config:
@@ -883,9 +1003,9 @@ class SetupTool(QDialog):
                 # Setze globale Einstellungen
                 self.settings.setValue("firma", ", ".join(firma))
                 self.settings.setValue("codierung_leerrohr", ", ".join(codierung_leerrohr))
-                self.settings.setValue("auftraggeber", auftraggeber)
                 self.settings.setValue("codierung_buendel", ", ".join(codierung_buendel))
                 self.settings.setValue("codierung_faser", ", ".join(codierung_faser))
+                self.settings.setValue("auftraggeber", auftraggeber)
                 self.settings.setValue("eigner", ", ".join(eigner))
                 self.settings.setValue("name", name)
                 self.settings.setValue("username", username)
@@ -895,50 +1015,62 @@ class SetupTool(QDialog):
                 self.settings.setValue("leerohr_subtyp", leerohr_subtyp)
                 self.settings.setValue("qgis_project_path", self.current_qgis_project_path)
 
+                # Aktualisiere active_setup in main.py
+                if hasattr(self.iface, 'plugin') and hasattr(self.iface.plugin, 'active_setup'):
+                    self.iface.plugin.active_setup = {
+                        "name": name,
+                        "umgebung": umgebung,
+                        "firma": firma,
+                        "codierung_leerrohr": codierung_leerrohr,
+                        "codierung_buendel": codierung_buendel,
+                        "codierung_faser": codierung_faser,
+                        "eigner": eigner,
+                        "auftraggeber": auftraggeber,
+                        "leerohr_subtyp": leerohr_subtyp,
+                        "qgis_project_path": self.current_qgis_project_path,
+                        "db_connection": db_connection
+                    }
+                    self.iface.plugin.update_setup_label()
+                    QgsMessageLog.logMessage(f"Updated active_setup in main.py: {self.iface.plugin.active_setup}", "SetupTool", Qgis.Info)
+
                 # Aktualisiere UI
                 self.ui.listWidget_Firma.clear()
-                self.populate_firma(username, password, umgebung)
+                self.populate_firma()
                 for item in self.ui.listWidget_Firma.findItems("", Qt.MatchContains):
                     if item.text() in firma:
                         item.setSelected(True)
 
                 self.ui.listWidget_Leerohr.clear()
-                cur.execute("SELECT \"CODIERUNG\", \"BEMERKUNG\", \"id\" FROM lwl.\"LUT_Codierung\" WHERE \"ELEMENT\" LIKE '%Leerrohr%' ORDER BY \"BEMERKUNG\"")
-                leerohr_options = [f"{row[0]} - {row[1]} (ID: {row[2]})" for row in cur.fetchall() if row[1]]
-                self.ui.listWidget_Leerohr.addItems(leerohr_options)
+                self.populate_codierung_leerrohr()
                 for item in self.ui.listWidget_Leerohr.findItems("", Qt.MatchContains):
                     text = item.text()
                     id_start = text.find("(ID: ") + 5
                     id_end = text.find(")", id_start)
                     if id_start > 4 and id_end > id_start:
-                        id_value = int(text[id_start:id_end])
-                        if str(id_value) in codierung_leerrohr:
+                        id_value = str(int(text[id_start:id_end]))
+                        if id_value in codierung_leerrohr:
                             item.setSelected(True)
 
                 self.ui.listWidget_Buendel.clear()
-                cur.execute("SELECT \"CODIERUNG\", \"BEMERKUNG\", \"id\" FROM lwl.\"LUT_Codierung\" WHERE \"ELEMENT\" LIKE '%Bündel%' ORDER BY \"BEMERKUNG\"")
-                buendel_options = [f"{row[0]} - {row[1]} (ID: {row[2]})" for row in cur.fetchall() if row[1]]
-                self.ui.listWidget_Buendel.addItems(buendel_options)
+                self.populate_codierung_buendel()
                 for item in self.ui.listWidget_Buendel.findItems("", Qt.MatchContains):
                     text = item.text()
                     id_start = text.find("(ID: ") + 5
                     id_end = text.find(")", id_start)
                     if id_start > 4 and id_end > id_start:
-                        id_value = int(text[id_start:id_end])
-                        if str(id_value) in codierung_buendel:
+                        id_value = str(int(text[id_start:id_end]))
+                        if id_value in codierung_buendel:
                             item.setSelected(True)
 
                 self.ui.listWidget_Faser.clear()
-                cur.execute("SELECT \"CODIERUNG\", \"BEMERKUNG\", \"id\" FROM lwl.\"LUT_Codierung\" WHERE \"ELEMENT\" LIKE '%Faser%' ORDER BY \"BEMERKUNG\"")
-                faser_options = [f"{row[0]} - {row[1]} (ID: {row[2]})" for row in cur.fetchall() if row[1]]
-                self.ui.listWidget_Faser.addItems(faser_options)
+                self.populate_codierung_faser()
                 for item in self.ui.listWidget_Faser.findItems("", Qt.MatchContains):
                     text = item.text()
                     id_start = text.find("(ID: ") + 5
                     id_end = text.find(")", id_start)
                     if id_start > 4 and id_end > id_start:
-                        id_value = int(text[id_start:id_end])
-                        if str(id_value) in codierung_faser:
+                        id_value = str(int(text[id_start:id_end]))
+                        if id_value in codierung_faser:
                             item.setSelected(True)
 
                 self.ui.listWidget_Eigner.clear()
@@ -965,7 +1097,7 @@ class SetupTool(QDialog):
                     except ValueError:
                         continue
 
-                # Prüfe, ob das aktuelle QGIS-Projekt mit dem gespeicherten übereinstimmt
+                # Prüfe QGIS-Projekt
                 current_project_path = QgsProject.instance().fileName()
                 if self.current_qgis_project_path and os.path.exists(self.current_qgis_project_path):
                     if current_project_path and os.path.normpath(current_project_path) == os.path.normpath(self.current_qgis_project_path):
@@ -983,29 +1115,27 @@ class SetupTool(QDialog):
                                 QgsProject.instance().read(self.current_qgis_project_path)
                                 self.iface.messageBar().pushMessage("Erfolg", f"QGIS-Projekt '{os.path.basename(self.current_qgis_project_path)}' geladen!", level=Qgis.Success)
                             except Exception as e:
-                                QgsMessageLog.logMessage(f"Fehler beim Laden des QGIS-Projekts: {e}", "SetupTool", level=Qgis.Critical)
+                                QgsMessageLog.logMessage(f"Fehler beim Laden des QGIS-Projekts: {e}", "SetupTool", Qgis.Critical)
                                 self.iface.messageBar().pushMessage("Fehler", f"Laden des QGIS-Projekts fehlgeschlagen: {e}", level=Qgis.Critical)
                     else:
                         try:
                             QgsProject.instance().read(self.current_qgis_project_path)
                             self.iface.messageBar().pushMessage("Erfolg", f"QGIS-Projekt '{os.path.basename(self.current_qgis_project_path)}' geladen!", level=Qgis.Success)
                         except Exception as e:
-                            QgsMessageLog.logMessage(f"Fehler beim Laden des QGIS-Projekts: {e}", "SetupTool", level=Qgis.Critical)
+                            QgsMessageLog.logMessage(f"Fehler beim Laden des QGIS-Projekts: {e}", "SetupTool", Qgis.Critical)
                             self.iface.messageBar().pushMessage("Fehler", f"Laden des QGIS-Projekts fehlgeschlagen: {e}", level=Qgis.Critical)
                 elif self.current_qgis_project_path:
                     self.iface.messageBar().pushMessage("Warnung", f"QGIS-Projekt '{self.current_qgis_project_path}' nicht gefunden.", level=Qgis.Warning)
 
-                if hasattr(self.iface, 'plugin') and hasattr(self.iface.plugin, 'update_setup_label'):
-                    self.iface.plugin.update_setup_label()
                 self.update_setup_label()
                 self.update_qgis_project_label()
                 QgsMessageLog.logMessage(f"Applied configuration: {name} (ID: {self.current_setup_id})", "SetupTool", Qgis.Info)
                 self.iface.messageBar().pushMessage("Erfolg", f"Konfiguration '{name}' angewendet und global gesetzt!", level=Qgis.Success)
             else:
                 self.iface.messageBar().pushMessage("Fehler", "Keine Konfiguration gefunden.", level=Qgis.Critical)
-            conn.close()
+            cur.close()
         except Exception as e:
-            QgsMessageLog.logMessage(f"Fehler beim Anwenden: {e}", "SetupTool", level=Qgis.Critical)
+            QgsMessageLog.logMessage(f"Fehler beim Anwenden: {e}", "SetupTool", Qgis.Critical)
             self.iface.messageBar().pushMessage("Fehler", f"Anwenden fehlgeschlagen: {e}", level=Qgis.Critical)
 
     def open_configuration(self):
@@ -1122,9 +1252,11 @@ class SetupTool(QDialog):
         self.is_connected = False
         self.current_setup_id = None
         self.current_qgis_project_path = ""
+        self.data_cache = {}  # Cache leeren
+        if self.conn:
+            self.conn.close()
+            self.conn = None
         self.ui.pushButton_Verbindung.setStyleSheet("background-color: gray;")
-        self.ui.label_Kommentar_3.clear()
-        self.ui.label_Kommentar_5.clear()
         self.ui.listWidget_Leerohr.clear()
         self.ui.listWidget_Buendel.clear()
         self.ui.listWidget_Faser.clear()
@@ -1133,11 +1265,16 @@ class SetupTool(QDialog):
         self.ui.listWidget_Leerohr_SubTyp.clear()
         self.ui.comboBox_Auftraggeber.clear()
         self.ui.tableView.setModel(None)
+        self.ui.label_Kommentar_3.clear()
+        self.ui.label_Kommentar_5.clear()
         try:
             self.ui.mQgsFileWidget.setFilePath("")
         except AttributeError as e:
             QgsMessageLog.logMessage(f"Fehler beim Zurücksetzen von mQgsFileWidget: {e}", "SetupTool", Qgis.Critical)
-        # Setze das aktive Setup und die Verbindung zurück
+        # Entferne Verbindungseinstellungen aus QSettings
+        self.settings.remove("connection_username")
+        self.settings.remove("connection_password")
+        self.settings.remove("connection_umgebung")
         self.settings.remove("firma")
         self.settings.remove("codierung_leerrohr")
         self.settings.remove("codierung_buendel")
@@ -1145,20 +1282,14 @@ class SetupTool(QDialog):
         self.settings.remove("auftraggeber")
         self.settings.remove("eigner")
         self.settings.remove("name")
-        self.settings.remove("username")
-        self.settings.remove("password")
-        self.settings.remove("umgebung")
-        self.settings.remove("db_connection")
         self.settings.remove("leerohr_subtyp")
         self.settings.remove("qgis_project_path")
-        self.settings.remove("connection_username")
-        self.settings.remove("connection_password")
-        self.settings.remove("connection_umgebung")
+        self.settings.remove("db_connection")
         if hasattr(self.iface, 'plugin') and hasattr(self.iface.plugin, 'update_setup_label'):
             self.iface.plugin.update_setup_label()
         self.update_setup_label()
         self.update_qgis_project_label()
-        self.iface.messageBar().pushMessage("Info", "Verbindung getrennt und aktives Setup zurückgesetzt!", level=Qgis.Info)
+        self.iface.messageBar().pushMessage("Info", "Verbindung getrennt, Einstellungen und Cache zurückgesetzt!", level=Qgis.Info)
 
     def reset_settings(self):
         # Verbindungsfelder und -status nicht zurücksetzen
