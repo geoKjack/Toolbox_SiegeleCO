@@ -49,7 +49,7 @@
       </rect>
      </property>
      <property name="title">
-      <string>Leerohr Prüfen:</string>
+      <string>Leerrohr Prüfen:</string>
      </property>
      <widget class="QLabel" name="label_Status">
       <property name="geometry">
@@ -197,7 +197,7 @@ QToolBox::tab:selected { background-color: darkgrey; }
          </rect>
         </property>
         <property name="text">
-         <string>Leerohr Bestand</string>
+         <string>Leerrohr Bestand</string>
         </property>
        </widget>
        <widget class="QLabel" name="label_gewaehltes_leerrohr">
@@ -832,8 +832,8 @@ QToolBox::tab:selected { background-color: darkgrey; }
        <widget class="QLabel" name="label_18">
         <property name="geometry">
          <rect>
-          <x>10</x>
-          <y>270</y>
+          <x>11</x>
+          <y>269</y>
           <width>111</width>
           <height>20</height>
          </rect>
@@ -881,7 +881,7 @@ QToolBox::tab:selected { background-color: darkgrey; }
       </rect>
      </property>
      <property name="text">
-      <string>Update Lererohr</string>
+      <string>Update Leerrohr</string>
      </property>
     </widget>
    </widget>

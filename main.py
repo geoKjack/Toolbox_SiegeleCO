@@ -32,9 +32,29 @@ class ToolBoxSiegeleCoPlugin:
         self.setup_label = None
         self.settings = QSettings("SiegeleCo", "ToolBox")
         self.active_setup = {}  # Dict für aktives Setup
-        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+        self.conn = None  # Persistente Verbindung
+        self.iface.plugin = self  # Explizit Plugin-Instanz setzen
         self.logger = logging.getLogger(__name__)
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
         self.logger.info("ToolBoxSiegeleCoPlugin initialisiert")
+        # Lade active_setup aus QSettings, wenn verfügbar
+        self.active_setup = {
+            "name": self.settings.value("name", ""),
+            "umgebung": self.settings.value("umgebung", ""),
+            "firma": self.settings.value("firma", "").split(", ") if self.settings.value("firma", "") else [],
+            "codierung_leerrohr": self.settings.value("codierung_leerrohr", "").split(", ") if self.settings.value("codierung_leerrohr", "") else [],
+            "codierung_buendel": self.settings.value("codierung_buendel", "").split(", ") if self.settings.value("codierung_buendel", "") else [],
+            "codierung_faser": self.settings.value("codierung_faser", "").split(", ") if self.settings.value("codierung_faser", "") else [],
+            "eigner": self.settings.value("eigner", "").split(", ") if self.settings.value("eigner", "") else [],
+            "auftraggeber": self.settings.value("auftraggeber", ""),
+            "leerrohr_subtyp": [int(x) for x in self.settings.value("leerrohr_subtyp", []) if x] if self.settings.value("leerrohr_subtyp", []) else [],
+            "qgis_project_path": self.settings.value("qgis_project_path", ""),
+            "db_connection": self.settings.value("db_connection", ""),
+            "leerrohr_subtyp_data": self.settings.value("leerrohr_subtyp_data", [])  # Subtyp-Daten einbeziehen
+        }
+        self.logger.info(f"active_setup aus QSettings geladen: {self.active_setup}")
+        if not self.active_setup:
+            self.logger.warning("Kein active_setup aus QSettings geladen")
 
     def initGui(self):
         self.toolbar = self.iface.addToolBar("Toolbox SiegeleCo")
@@ -80,9 +100,10 @@ class ToolBoxSiegeleCoPlugin:
             "codierung_faser": self.settings.value("codierung_faser", "").split(", ") if self.settings.value("codierung_faser", "") else [],
             "eigner": self.settings.value("eigner", "").split(", ") if self.settings.value("eigner", "") else [],
             "auftraggeber": self.settings.value("auftraggeber", ""),
-            "leerohr_subtyp": [int(x) for x in self.settings.value("leerohr_subtyp", []) if x] if self.settings.value("leerohr_subtyp", []) else [],
+            "leerrohr_subtyp": [int(x) for x in self.settings.value("leerrohr_subtyp", []) if x] if self.settings.value("leerrohr_subtyp", []) else [],
             "qgis_project_path": self.settings.value("qgis_project_path", ""),
-            "db_connection": self.settings.value("db_connection", "")
+            "db_connection": self.settings.value("db_connection", ""),
+            "leerrohr_subtyp_data": self.settings.value("leerrohr_subtyp_data", [])  # Subtyp-Daten
         }
         self.logger.info(f"Aktives Setup aktualisiert: {self.active_setup}")
 
@@ -95,13 +116,13 @@ class ToolBoxSiegeleCoPlugin:
 
     def run_leerrohrverbinden_tool(self):
         if not self.settings.value("name"):
-            self.iface.messageBar().pushMessage("Fehler", "Bitte wählen Sie zuerst ein Setup im Setup-Tool aus!", level=Qgis.Critical)
+            self.iface.messageBar().pushMessage("Fehler", "Bitte wählen Sie zuerst ein Setup im Setup-Tool aus aus!", level=Qgis.Critical)
             return
         self.iface.messageBar().pushMessage("Leerrohr Verwalten Tool aktiviert", level=Qgis.Info)
 
     def run_kabel_verlegen(self):
         if not self.settings.value("name"):
-            self.iface.messageBar().pushMessage("Fehler", "Bitte wählen Sie zuerst ein Setup im Setup-Tool aus!", level=Qgis.Critical)
+            self.iface.messageBar().pushMessage("Fehler", "Bitte wählen Sie zuerst ein Setup im Setup-Tool aus aus!", level=Qgis.Critical)
             return
         self.iface.messageBar().pushMessage("Kabel Verlegen Tool aktiviert", level=Qgis.Info)
         if not self.kabel_tool:
@@ -110,13 +131,17 @@ class ToolBoxSiegeleCoPlugin:
 
     def run_spleisstool(self):
         if not self.settings.value("name"):
-            self.iface.messageBar().pushMessage("Fehler", "Bitte wählen Sie zuerst ein Setup im Setup-Tool aus!", level=Qgis.Critical)
+            self.iface.messageBar().pushMessage("Fehler", "Bitte wählen Sie zuerst ein Setup im Setup-Tool aus aus!", level=Qgis.Critical)
             return
         self.iface.messageBar().pushMessage("Spleiss-Tool aktiviert", level=Qgis.Info)
 
     def run_leerrohr_erfassen(self):
         if not self.settings.value("name"):
-            self.iface.messageBar().pushMessage("Fehler", "Bitte wählen Sie zuerst ein Setup im Setup-Tool aus!", level=Qgis.Critical)
+            self.iface.messageBar().pushMessage("Fehler", "Bitte wählen Sie zuerst ein Setup im Setup-Tool aus aus!", level=Qgis.Critical)
+            return
+        if not self.active_setup.get("leerrohr_subtyp"):
+            self.iface.messageBar().pushMessage("Fehler", "Keine Leerrohr-Subtypen im Setup definiert. Bitte überprüfen Sie die Konfiguration im Setup-Tool.", level=Qgis.Critical)
+            self.logger.warning("Keine leerrohr_subtyp in active_setup gefunden")
             return
         self.iface.messageBar().pushMessage("Leerrohr Erfassen aktiviert", level=Qgis.Info)
         if self.leerrohr_tool and not sip.isdeleted(self.leerrohr_tool):
@@ -124,10 +149,11 @@ class ToolBoxSiegeleCoPlugin:
         self.leerrohr_tool = LeerrohrVerlegenTool(self.iface)
         self.leerrohr_tool.setAttribute(Qt.WA_DeleteOnClose)
         self.leerrohr_tool.show()
+        self.logger.info(f"LeerrohrVerlegenTool gestartet mit active_setup: {self.active_setup}")
 
     def run_hausanschluss_verlegen(self):
         if not self.settings.value("name"):
-            self.iface.messageBar().pushMessage("Fehler", "Bitte wählen Sie zuerst ein Setup im Setup-Tool aus!", level=Qgis.Critical)
+            self.iface.messageBar().pushMessage("Fehler", "Bitte wählen Sie zuerst ein Setup im Setup-Tool aus aus!", level=Qgis.Critical)
             return
         if HauseinfuehrungsVerlegungsTool.instance is not None:
             HauseinfuehrungsVerlegungsTool.instance.raise_()
@@ -151,7 +177,7 @@ class ToolBoxSiegeleCoPlugin:
         self.settings.remove("auftraggeber")
         self.settings.remove("eigner")
         self.settings.remove("name")
-        self.settings.remove("leerohr_subtyp")
+        self.settings.remove("leerrohr_subtyp")
         self.settings.remove("qgis_project_path")
         self.settings.remove("db_connection")
         self.active_setup = {}  # Reset Setup-Dict

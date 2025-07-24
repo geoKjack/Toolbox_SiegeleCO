@@ -50,15 +50,20 @@ class LeerrohrVerlegenTool(QDialog):
         # Setup-Settings initialisieren
         self.settings = QSettings("SiegeleCo", "ToolBox")
         self.db_details = None
-        try:
-            self.conn = psycopg2.connect(**self.db_details)
-            self.cur = self.conn.cursor()
-            print("DEBUG: Persistente DB-Verbindung geöffnet")
-        except Exception as e:
-            print(f"DEBUG: Fehler bei persistenter DB-Verbindung: {e}")
-            self.conn = None
-            self.cur = None
         self.is_connected = False
+        self.conn = None
+        self.cur = None
+
+        # Persistente Verbindung aus Setup-Tool übernehmen
+        if hasattr(self.iface, 'plugin') and hasattr(self.iface.plugin, 'conn') and self.iface.plugin.conn:
+            self.conn = self.iface.plugin.conn
+            self.cur = self.conn.cursor()
+            self.is_connected = True
+            print("DEBUG: Persistente DB-Verbindung aus Setup-Tool übernommen")
+            self.db_details = self.get_database_connection()
+        else:
+            print("DEBUG: Keine persistente Verbindung aus Setup-Tool verfügbar")
+            self.iface.messageBar().pushMessage("Fehler", "Keine DB-Verbindung. Bitte Setup öffnen.", level=Qgis.Critical)
 
         # Neue Ergänzung: Dictionary für Subtyp-Quantitäten
         self.subtyp_quantities = {}  # subtyp_id -> quantity (int, Default: 1)
@@ -79,7 +84,7 @@ class LeerrohrVerlegenTool(QDialog):
         self.ui.pushButton_routing.clicked.connect(self.start_routing)
         self.ui.pushButton_subduct.clicked.connect(self.select_subduct_parent)
         self.ui.pushButton_Datenpruefung.clicked.connect(self.pruefe_daten)
-        self.ui.pushButton_Import.setEnabled(False)
+        self.ui.pushButton_Import.setEnabled(self.is_connected)
         self.ui.pushButton_Import.clicked.connect(self.importiere_daten)
         self.ui.pushButton_zwischenknoten.clicked.connect(self.select_zwischenknoten)
         self.ui.pushButton_select_leerrohr.clicked.connect(self.select_leerrohr)
@@ -141,58 +146,35 @@ class LeerrohrVerlegenTool(QDialog):
             super().mousePressEvent(event)
 
     def load_setup_data(self):
-        """Lädt Datenbankverbindung und Subtypen aus dem aktiven Setup."""
-        print("DEBUG: Lade Setup-Daten")
-        username = self.settings.value("connection_username", "")
-        password = base64.b64decode(self.settings.value("connection_password", "").encode()).decode() if self.settings.value("connection_password", "") else ""
-        umgebung = self.settings.value("connection_umgebung", "")
-
-        if not username or not password or not umgebung:
-            self.iface.messageBar().pushMessage("Fehler", "Keine Setup-Verbindung gefunden. Bitte konfigurieren Sie das Setup.", level=Qgis.Critical)
+        """Lädt Subtypen aus self.iface.plugin.active_setup und befüllt ListWidgets."""
+        print(f"DEBUG: Lade Subtypen aus active_setup: leerrohr_subtyp = {self.iface.plugin.active_setup.get('leerrohr_subtyp', [])}, leerrohr_subtyp_data = {self.iface.plugin.active_setup.get('leerrohr_subtyp_data', [])}")
+        if not hasattr(self.iface, 'plugin') or not hasattr(self.iface.plugin, 'active_setup') or not self.iface.plugin.active_setup:
+            self.iface.messageBar().pushMessage("Fehler", "Kein aktives Setup gefunden. Bitte konfigurieren Sie das Setup.", level=Qgis.Critical)
+            QgsMessageLog.logMessage("Kein aktives Setup in iface.plugin.active_setup", "Leerrohr-Tool", Qgis.Critical)
             return
 
-        # Datenbankverbindungsparameter setzen
-        self.db_details = self.get_database_connection(username, password, umgebung)
-        try:
-            conn = psycopg2.connect(**self.db_details)
-            conn.close()
-            self.is_connected = True
-            self.ui.pushButton_Import.setEnabled(True)
-            QgsMessageLog.logMessage(f"Verbindung zu {umgebung} hergestellt.", "Leerrohr-Tool", Qgis.Info)
-        except Exception as e:
-            self.is_connected = False
-            self.ui.pushButton_Import.setEnabled(False)
-            self.iface.messageBar().pushMessage("Fehler", f"Verbindung fehlgeschlagen: {e}", level=Qgis.Critical)
-            QgsMessageLog.logMessage(f"Verbindungsfehler zu {umgebung}: {e}", "Leerrohr-Tool", Qgis.Critical)
-            return
-
-        # Lade Subtypen aus dem Setup
-        leerohr_subtyp = [int(x) for x in self.settings.value("leerohr_subtyp", []) if x]
-        if not leerohr_subtyp:
+        active_setup = self.iface.plugin.active_setup
+        leerrohr_subtyp_ids = active_setup.get("leerrohr_subtyp", [])
+        if not leerrohr_subtyp_ids:
             self.iface.messageBar().pushMessage("Info", "Keine Subtypen im Setup gefunden.", level=Qgis.Info)
+            QgsMessageLog.logMessage("Keine Subtypen in active_setup", "Leerrohr-Tool", Qgis.Info)
+            return
+
+        leerrohr_subtyp_data = active_setup.get("leerrohr_subtyp_data", [])
+        if not leerrohr_subtyp_data:
+            self.iface.messageBar().pushMessage("Fehler", "Keine Subtyp-Daten in active_setup verfügbar.", level=Qgis.Critical)
+            QgsMessageLog.logMessage("Keine leerrohr_subtyp_data in active_setup", "Leerrohr-Tool", Qgis.Critical)
             return
 
         try:
-            conn = psycopg2.connect(**self.db_details)
-            cur = conn.cursor()
-            query = """
-                SELECT s.id, s."ID_TYP", s."SUBTYP_char", c."CODIERUNG", c."BEMERKUNG", c."id" AS codierung_id
-                FROM lwl."LUT_Leerrohr_SubTyp" s
-                JOIN lwl."LUT_Codierung" c ON s."ID_CODIERUNG" = c."id"
-                WHERE s."id" = ANY(%s)
-                ORDER BY s."ID_TYP", s."SUBTYP_char"
-            """
-            cur.execute(query, (leerohr_subtyp,))
-            subtypen = cur.fetchall()
-
-            # Fülle ListWidgets basierend auf ID_TYP
             self.ui.listWidget_Zubringerrohr.clear()
             self.ui.listWidget_Hauptrohr.clear()
             self.ui.listWidget_Multirohr.clear()
-            for subtyp in subtypen:
+            for subtyp in leerrohr_subtyp_data:
                 subtyp_id, typ_nummer, subtyp_char, codierung, bemerkung, codierung_id = subtyp
+                if subtyp_id not in leerrohr_subtyp_ids:
+                    continue
                 item_text = f"{subtyp_id} - {typ_nummer} - {subtyp_char} - {codierung} - {bemerkung} (ID: {codierung_id})"
-                print(f"DEBUG: Füge ListWidget-Eintrag hinzu: {item_text}")
                 if typ_nummer == 1:
                     self.ui.listWidget_Zubringerrohr.addItem(item_text)
                 elif typ_nummer == 2:
@@ -202,19 +184,14 @@ class LeerrohrVerlegenTool(QDialog):
             self.ui.listWidget_Zubringerrohr.setSelectionMode(QListWidget.MultiSelection)
             self.ui.listWidget_Hauptrohr.setSelectionMode(QListWidget.MultiSelection)
             self.ui.listWidget_Multirohr.setSelectionMode(QListWidget.MultiSelection)
-            # Aktiviere alle Elemente initial
             for list_widget in [self.ui.listWidget_Zubringerrohr, self.ui.listWidget_Hauptrohr, self.ui.listWidget_Multirohr]:
                 for i in range(list_widget.count()):
                     item = list_widget.item(i)
                     item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
-            QgsMessageLog.logMessage(f"Geladene Subtypen: {subtypen}", "Leerrohr-Tool", Qgis.Info)
+            QgsMessageLog.logMessage(f"Geladene Subtypen: {len(leerrohr_subtyp_ids)} Einträge", "Leerrohr-Tool", Qgis.Info)
         except Exception as e:
-            self.iface.messageBar().pushMessage("Fehler", f"Laden der Subtypen fehlgeschlagen: {e}", level=Qgis.Critical)
-            QgsMessageLog.logMessage(f"Fehler Subtypen: {e}", "Leerrohr-Tool", Qgis.Critical)
-        finally:
-            if 'conn' in locals():
-                cur.close()
-                conn.close()
+            self.iface.messageBar().pushMessage("Fehler", f"Laden der Subtypen fehlgeschlagen: {str(e)}", level=Qgis.Critical)
+            QgsMessageLog.logMessage(f"Fehler Subtypen: {str(e)}", "Leerrohr-Tool", Qgis.Critical)
 
     def debug_check(self):
         """Prüft den Zugriff auf UI-Elemente für Debugging-Zwecke."""
@@ -1784,16 +1761,11 @@ class LeerrohrVerlegenTool(QDialog):
         self.map_tool = None
 
     def update_selected_leerrohr_subtyp(self):
-        """Aktualisiert die grafische Anzeige der ausgewählten Leerrohr-Subtypen im graphicsView_Auswahl_Subtyp."""
+        """Aktualisiert die Subtyp-Anzeige in der GraphicsView, inklusive Duplizieren-Button."""
         print("DEBUG: Starte update_selected_leerrohr_subtyp")
-        scene = QGraphicsScene()
-        self.ui.graphicsView_Auswahl_Subtyp.setScene(scene)
-        self.ui.graphicsView_Auswahl_Subtyp.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.ui.graphicsView_Auswahl_Subtyp.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        y_offset = 0
-        font = QFont("Arial", 12, QFont.Bold)
+        self.subtyp_scene.clear()  # Szene leeren
         selected_subtyp_ids = []
-        belegte_rohre = set()
+        belegte_rohre = set()  # Für belegte Rohre, falls nötig
 
         for list_widget in [self.ui.listWidget_Zubringerrohr, self.ui.listWidget_Hauptrohr, self.ui.listWidget_Multirohr]:
             for item in list_widget.selectedItems():
@@ -1803,101 +1775,25 @@ class LeerrohrVerlegenTool(QDialog):
                 except ValueError:
                     continue
 
-        if self.ui.radioButton_Abzweigung.isChecked() and self.selected_parent_leerrohr:
-            # Übernommene Parent-Anzeige aus Sicherung (einfach, ohne belegte Rohre für Parent)
-            parent_subtyp_id = self.selected_parent_leerrohr["SUBTYP"]
-            parent_rohre, parent_subtyp_char, parent_typ = self.parse_rohr_definition(parent_subtyp_id)  # Hole parent_typ hinzu
-            if parent_rohre and parent_subtyp_char:
-                parent_label = scene.addText(f"{parent_subtyp_char} (Parent):")
-                parent_label.setPos(0, y_offset)
-                parent_label.setDefaultTextColor(Qt.red)  # Rot für Parent-Beschriftung
-                parent_label.setFont(font)
-                parent_label.setZValue(1)
-                scene.addItem(parent_label)
-                y_offset += parent_label.boundingRect().height() + 5
-                x_offset = 0
+        if not selected_subtyp_ids:
+            self.ui.label_Status.setText("Kein Subtyp ausgewählt.")
+            self.ui.label_Status.setStyleSheet("background-color: lightcoral;")
+            return
 
-                font.setPointSize(10)
-                unique_durchmesser = set(durchmesser for _, _, durchmesser, _, _, _ in parent_rohre)
-                is_mixed = len(unique_durchmesser) > 1
-                max_durchmesser = max(unique_durchmesser) if unique_durchmesser else 0
-                square_size = {1: 30, 2: 25, 3: 20}.get(parent_typ, 20)  # Gleich wie beim Subtyp, basierend auf parent_typ
-                for rohr_id, rohr_nummer, durchmesser, farbe, primary_farbcode, secondary_farbcode in parent_rohre:
-                    add_adjust = 5 if is_mixed and durchmesser == max_durchmesser else 0
-                    size = square_size + add_adjust
-                    x = x_offset
-                    y = y_offset + (square_size - size) / 2
-
-                    rect = QGraphicsRectItem(x, y, size, size)
-                    rect.setPen(QPen(Qt.black, 1))
-                    scene.addItem(rect)
-
-                    triangle1_points = [
-                        QPointF(x, y),
-                        QPointF(x + size, y),
-                        QPointF(x, y + size)
-                    ]
-                    triangle2_points = [
-                        QPointF(x + size, y),
-                        QPointF(x + size, y + size),
-                        QPointF(x, y + size)
-                    ]
-
-                    triangle1 = QGraphicsPolygonItem(QPolygonF(triangle1_points), rect)
-                    triangle2 = QGraphicsPolygonItem(QPolygonF(triangle2_points), rect)
-
-                    if secondary_farbcode:
-                        color1 = QColor(primary_farbcode)
-                        color2 = QColor(secondary_farbcode)
-                        triangle1.setBrush(QBrush(color1))
-                        triangle2.setBrush(QBrush(color2))
-                    else:
-                        color = QColor(primary_farbcode)
-                        triangle1.setBrush(QBrush(color))
-                        triangle2.setBrush(QBrush(color))
-
-                    triangle1.setPen(QPen(Qt.NoPen))
-                    triangle2.setPen(QPen(Qt.NoPen))
-                    triangle1.setZValue(0)
-                    triangle2.setZValue(0)
-
-                    text = scene.addText(str(rohr_nummer))
-                    text_center_x = x + size / 2 - text.boundingRect().width() / 2
-                    text_center_y = y + size / 2 - text.boundingRect().height() / 2
-                    text.setPos(text_center_x, text_center_y)
-                    color = QColor(primary_farbcode)
-                    brightness = (color.red() * 0.299 + color.green() * 0.587 + color.blue() * 0.114)
-                    text.setDefaultTextColor(Qt.black if brightness > 128 else Qt.white)
-                    text.setFont(font)
-                    text.setZValue(3)
-                    scene.addItem(text)
-
-                    x_offset += size + 1
-
-                y_offset += square_size + 5
-            else:
-                print(f"DEBUG: Keine Rohre oder SUBTYP_char für Parent-Subtyp {parent_subtyp_id} gefunden")
-                self.ui.label_Status.setText(f"Keine Daten für Parent-Leerrohr Subtyp {parent_subtyp_id} gefunden.")
-                self.ui.label_Status.setStyleSheet("background-color: lightcoral;")
-
-        # Subtyp-Anzeige: Unterscheide Modi, um Beschriftung für Abzweigungen wie in Sicherung zu halten
-        if self.ui.radioButton_Abzweigung.isChecked() or self.selected_leerrohr:
-            # Übernommene Logik aus Sicherung: Einfache Beschriftung ohne Duplikate/Quantities/Button
-            for subtyp_id in selected_subtyp_ids:
-                rohre, subtyp_char, typ = self.parse_rohr_definition(subtyp_id)
-                if not rohre or subtyp_char is None:
-                    self.ui.label_Status.setText(f"Keine Rohre oder SUBTYP_char für Subtyp {subtyp_id} gefunden.")
-                    self.ui.label_Status.setStyleSheet("background-color: lightcoral;")
-                    continue
-
-                square_size = {1: 30, 2: 25, 3: 20}.get(typ, 20)
-                x_offset = 0
-                subtyp_text = scene.addText(f"{subtyp_char}:")
-                subtyp_text.setPos(x_offset, y_offset)
+        y_offset = 0
+        square_size = 20
+        font = QFont("Arial", 12, QFont.Bold)
+        for subtyp_id in selected_subtyp_ids:
+            rohre, subtyp_char, typ = self.parse_rohr_definition(subtyp_id)
+            if not rohre:
+                print(f"DEBUG: Keine Rohr-Definition für Subtyp {subtyp_id}")
+                continue
+            quantity = self.subtyp_quantities.get(subtyp_id, 1)
+            for q in range(quantity):
+                subtyp_text = self.subtyp_scene.addText(f"{subtyp_char} (Typ {typ})" if q == 0 else f"{subtyp_char} (Duplikat {q})")
+                subtyp_text.setPos(0, y_offset)
                 subtyp_text.setDefaultTextColor(Qt.black)
                 subtyp_text.setFont(font)
-                subtyp_text.setZValue(1)
-                scene.addItem(subtyp_text)
                 y_offset += subtyp_text.boundingRect().height() + 5
                 x_offset = 0
 
@@ -1950,19 +1846,19 @@ class LeerrohrVerlegenTool(QDialog):
                     triangle2.setPen(QPen(Qt.NoPen))
                     triangle1.setZValue(0)
                     triangle2.setZValue(0)
-                    scene.addItem(rect)
+                    self.subtyp_scene.addItem(rect)
 
                     if ist_belegt:
                         line1 = QGraphicsLineItem(x, y, x + size, y + size, rect)
                         line1.setPen(QPen(Qt.red, 2))
                         line1.setZValue(2)
-                        scene.addItem(line1)
+                        self.subtyp_scene.addItem(line1)
                         line2 = QGraphicsLineItem(x + size, y, x, y + size, rect)
                         line2.setPen(QPen(Qt.red, 2))
                         line2.setZValue(2)
-                        scene.addItem(line2)
+                        self.subtyp_scene.addItem(line2)
 
-                    text = scene.addText(str(rohr_nummer))
+                    text = self.subtyp_scene.addText(str(rohr_nummer))
                     text_center_x = x + size / 2 - text.boundingRect().width() / 2
                     text_center_y = y + size / 2 - text.boundingRect().height() / 2
                     text.setPos(text_center_x, text_center_y)
@@ -1971,123 +1867,21 @@ class LeerrohrVerlegenTool(QDialog):
                     text.setDefaultTextColor(Qt.black if brightness > 128 else Qt.white)
                     text.setFont(font)
                     text.setZValue(3)
-                    scene.addItem(text)
+                    self.subtyp_scene.addItem(text)
 
                     x_offset += size + 1
 
                 y_offset += square_size + 5
-        else:
-            # Behalte neue Logik für Hauptstrang-Import: Mit Quantities und Duplizieren-Button
-            for subtyp_id in selected_subtyp_ids:
-                rohre, subtyp_char, typ = self.parse_rohr_definition(subtyp_id)
-                if not rohre or subtyp_char is None:
-                    self.ui.label_Status.setText(f"Keine Rohre oder SUBTYP_char für Subtyp {subtyp_id} gefunden.")
-                    self.ui.label_Status.setStyleSheet("background-color: lightcoral;")
-                    continue
 
-                quantity = self.subtyp_quantities.get(subtyp_id, 1)
-                print(f"DEBUG: Anzeige Subtyp {subtyp_id} mit Quantity: {quantity}")
-
-                square_size = {1: 30, 2: 25, 3: 20}.get(typ, 20)
-                for q in range(quantity):
-                    x_offset = 0
-                    if q == 0:
-                        subtyp_text = scene.addText(f"{subtyp_char}:")
-                    else:
-                        subtyp_text = scene.addText(f" (Duplikat {q+1}):")
-                    subtyp_text.setPos(x_offset, y_offset)
-                    subtyp_text.setDefaultTextColor(Qt.black)
-                    subtyp_text.setFont(font)
-                    subtyp_text.setZValue(1)
-                    scene.addItem(subtyp_text)
-                    y_offset += subtyp_text.boundingRect().height() + 5
-                    x_offset = 0
-
-                    font.setPointSize(10)
-                    unique_durchmesser = set(durchmesser for _, _, durchmesser, _, _, _ in rohre)
-                    is_mixed = len(unique_durchmesser) > 1
-                    max_durchmesser = max(unique_durchmesser) if unique_durchmesser else 0
-                    for rohr_id, rohr_nummer, durchmesser, farbe, primary_farbcode, secondary_farbcode in rohre:
-                        ist_belegt = rohr_nummer in belegte_rohre and self.selected_leerrohr
-                        add_adjust = 5 if is_mixed and durchmesser == max_durchmesser else 0
-                        size = square_size + add_adjust
-                        x = x_offset
-                        y = y_offset + (square_size - size) / 2
-
-                        rect = QGraphicsRectItem(x, y, size, size)
-                        rect.setPen(QPen(Qt.red if ist_belegt else Qt.black, 2 if ist_belegt else 1))
-                        if ist_belegt:
-                            rect.setToolTip(f"Rohrnummer {rohr_nummer} bereits belegt")
-
-                        triangle1_points = [
-                            QPointF(x, y),
-                            QPointF(x + size, y),
-                            QPointF(x, y + size)
-                        ]
-                        triangle2_points = [
-                            QPointF(x + size, y),
-                            QPointF(x + size, y + size),
-                            QPointF(x, y + size)
-                        ]
-
-                        triangle1 = QGraphicsPolygonItem(QPolygonF(triangle1_points), rect)
-                        triangle2 = QGraphicsPolygonItem(QPolygonF(triangle2_points), rect)
-
-                        if ist_belegt:
-                            color = QColor("#808080")
-                            triangle1.setBrush(QBrush(color))
-                            triangle2.setBrush(QBrush(color))
-                        else:
-                            if secondary_farbcode:
-                                color1 = QColor(primary_farbcode)
-                                color2 = QColor(secondary_farbcode)
-                                triangle1.setBrush(QBrush(color1))
-                                triangle2.setBrush(QBrush(color2))
-                            else:
-                                color = QColor(primary_farbcode)
-                                triangle1.setBrush(QBrush(color))
-                                triangle2.setBrush(QBrush(color))
-
-                        triangle1.setPen(QPen(Qt.NoPen))
-                        triangle2.setPen(QPen(Qt.NoPen))
-                        triangle1.setZValue(0)
-                        triangle2.setZValue(0)
-                        scene.addItem(rect)
-
-                        if ist_belegt:
-                            line1 = QGraphicsLineItem(x, y, x + size, y + size, rect)
-                            line1.setPen(QPen(Qt.red, 2))
-                            line1.setZValue(2)
-                            scene.addItem(line1)
-                            line2 = QGraphicsLineItem(x + size, y, x, y + size, rect)
-                            line2.setPen(QPen(Qt.red, 2))
-                            line2.setZValue(2)
-                            scene.addItem(line2)
-
-                        text = scene.addText(str(rohr_nummer))
-                        text_center_x = x + size / 2 - text.boundingRect().width() / 2
-                        text_center_y = y + size / 2 - text.boundingRect().height() / 2
-                        text.setPos(text_center_x, text_center_y)
-                        color = QColor("#808080" if ist_belegt else primary_farbcode)
-                        brightness = (color.red() * 0.299 + color.green() * 0.587 + color.blue() * 0.114)
-                        text.setDefaultTextColor(Qt.black if brightness > 128 else Qt.white)
-                        text.setFont(font)
-                        text.setZValue(3)
-                        scene.addItem(text)
-
-                        x_offset += size + 1
-
-                    y_offset += square_size + 5
-
-                # Nach allen Instanzen: Füge den Duplizieren-Button hinzu (nur im Hauptstrang-Modus)
+                # Duplizieren-Button hinzufügen (nur im Hauptstrang-Modus)
                 if not (self.ui.radioButton_Abzweigung.isChecked() or self.selected_leerrohr):
                     button = self.DuplicateButtonItem(subtyp_id, self)
-                    button.setPos(x_offset + 10, y_offset - square_size - 10)  # 10 px rechts vom letzten Kästchen
-                    scene.addItem(button)
+                    button.setPos(x_offset + 10, y_offset - square_size - 10)
+                    self.subtyp_scene.addItem(button)
                     print(f"DEBUG: Duplizieren-Button für Subtyp {subtyp_id} hinzugefügt")
 
-        # Dynamische Anpassung der SceneRect für Scrollbarkeit
-        scene.setSceneRect(0, 0, 491, y_offset + 20)
+        self.subtyp_scene.setSceneRect(0, 0, 491, y_offset + 20)
+        self.ui.graphicsView_Auswahl_Subtyp.setScene(self.subtyp_scene)
         self.ui.label_Status.setText("Subtypen erfolgreich angezeigt.")
         self.ui.label_Status.setStyleSheet("background-color: lightgreen;")
         self.update_combobox_states()
@@ -2418,24 +2212,32 @@ class LeerrohrVerlegenTool(QDialog):
                     print(f"DEBUG: Abzweigung eingefügt, Rows affected: {cur.rowcount}, COUNT: {count_value}, STATUS: {status}, ID_CODIERUNG: {id_codierung}")
             else:
                 print("DEBUG: Hauptstrang-Modus aktiviert")
-                # In importiere_daten (Hauptstrang-Modus)
+                # ID_TRASSE_NEU korrekt aufbauen
                 id_trasse_jsonb = None
                 if self.selected_trasse_ids_flat:
                     trasse_list = []
-                    num_trassen = len(self.selected_trasse_ids_flat)
+                    current_knoten = self.selected_verteiler
                     for i, tid in enumerate(self.selected_trasse_ids_flat):
-                        reverse = False  # Default: Vorwärts
-                        # Beispiel-Logik für Sackstich: Setze reverse=true für Rückwege (ab der Hälfte der Liste)
-                        # Passe das an deine echte Routing-Logik an (z. B. prüfe Knoten-Richtung oder Pfad-Richtung)
-                        if i >= num_trassen // 2:  # Einfaches Beispiel: Rückweg ab Mitte (für symmetrische Sackstiche)
-                            reverse = True
+                        cur.execute("""
+                            SELECT "VONKNOTEN", "NACHKNOTEN"
+                            FROM lwl."LWL_Trasse"
+                            WHERE id = %s
+                        """, (tid,))
+                        von, nach = cur.fetchone()
+                        reverse = False
+                        if von != current_knoten:
+                            if nach == current_knoten:
+                                reverse = True  # Flip, wenn rückwärts anknüpft
+                            else:
+                                raise Exception(f"Trasse {tid} knüpft nicht an {current_knoten} an!")
+                        current_knoten = nach if not reverse else von  # Nächster Knoten
                         trasse_list.append({
                             "index": i + 1,
                             "id": tid,
                             "reverse": reverse
                         })
                     id_trasse_jsonb = json.dumps(trasse_list)
-                    print(f"DEBUG: Erweitertes ID_TRASSE_NEU mit reverse-Flag: {id_trasse_jsonb}")
+                    print(f"DEBUG: ID_TRASSE_NEU gebaut: {id_trasse_jsonb}")
                 trassen_ids_pg_array = "{" + ",".join(map(str, set(self.selected_trasse_ids_flat))) + "}" if self.selected_trasse_ids_flat else None
                 trassen_ids_pg_array = "{" + ",".join(map(str, set(self.selected_trasse_ids_flat))) + "}" if self.selected_trasse_ids_flat else None
                 status = status_id if status_id is not None else 1  # Nutze Dropdown oder Fallback
@@ -2894,10 +2696,7 @@ class LeerrohrVerlegenTool(QDialog):
             print("DEBUG: Alle Routing-Highlights entfernt")
         self.selected_trasse_ids = []
         self.selected_trasse_ids_flat = []
-        if hasattr(self, 'conn') and self.conn:
-            self.cur.close()
-            self.conn.close()
-            print("DEBUG: Persistente DB-Verbindung geschlossen")
+        print("DEBUG: Verbindung bleibt offen für andere Tools")
         self.close()
 
     def closeEvent(self, event):

@@ -2,10 +2,9 @@
     <qresource prefix="/plugins/ToolBox_SiegeleCo">
         <file>icons/setup_Toolbox.png</file>
         <file>icons/icon_kabel_verlegen.png</file>
-        <file>icons/icon_kundendaten_tool.png</file>
-        <file>icons/icon_split_tool.png</file>
-        <file>icons/icon_trasse_verwalten_tool.png</file>
-        <file>icons/icon_leerrohr_verwalten_tool.png</file>
+        <file>icons/icon_spleiss_tool.png</file>
+        <file>icons/icon_leerrohr_verlegen_tool.png</file>
+        <file>icons/icon_leerohr_verbinden_tool.png</file>
         <file>icons/icon_hausanschluesse.png</file>
     </qresource>
 </RCC>
