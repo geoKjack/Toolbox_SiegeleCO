@@ -1,0 +1,287 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>LeerrohrVerbinderDialog</class>
+ <widget class="QDialog" name="LeerrohrVerbinderDialog">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>900</width>
+    <height>700</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Leerrohr Verbinden</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout_root">
+   <item>
+    <widget class="QLabel" name="label_Status">
+     <property name="text">
+      <string>Bereit. Klicken Sie auf „Verbindung wählen“, „Leerrohr 1“ und „Leerrohr 2“, um zu starten.</string>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QWidget" name="widget_row1">
+     <layout class="QHBoxLayout" name="horizontalLayout_row1">
+      <item>
+       <widget class="QPushButton" name="pushButton_verbindung">
+        <property name="text">
+         <string>Verbindung wählen</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="pushButton_leerrohr1">
+        <property name="text">
+         <string>Leerrohr 1 wählen</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="pushButton_leerrohr2">
+        <property name="text">
+         <string>Leerrohr 2 wählen</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <spacer name="horizontalSpacer_row1">
+        <property name="orientation">
+         <enum>Qt::Horizontal</enum>
+        </property>
+       </spacer>
+      </item>
+      <item>
+       <widget class="QLabel" name="label_Toleranz">
+        <property name="text">
+         <string>Toleranz (m):</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QDoubleSpinBox" name="spinBox_Toleranz">
+        <property name="decimals">
+         <number>2</number>
+        </property>
+        <property name="singleStep">
+         <double>0.1</double>
+        </property>
+        <property name="value">
+         <double>1.0</double>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QCheckBox" name="chkNurFreie">
+        <property name="text">
+         <string>nur freie Rohre</string>
+        </property>
+        <property name="checked">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QSplitter" name="splitter_lists">
+     <property name="orientation">
+      <enum>Qt::Horizontal</enum>
+     </property>
+     <widget class="QWidget" name="widget_left_list">
+      <layout class="QVBoxLayout" name="verticalLayout_left_list">
+       <item>
+        <widget class="QLabel" name="label_lr1">
+         <property name="text">
+          <string>Leerrohr 1 (Treffer):</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QListWidget" name="listWidget_Leerohr1"/>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="widget_right_list">
+      <layout class="QVBoxLayout" name="verticalLayout_right_list">
+       <item>
+        <widget class="QLabel" name="label_lr2">
+         <property name="text">
+          <string>Leerrohr 2 (Treffer):</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QListWidget" name="listWidget_Leerohr2"/>
+       </item>
+      </layout>
+     </widget>
+    </widget>
+   </item>
+   <item>
+    <widget class="QTabWidget" name="tabWidget_views">
+     <widget class="QWidget" name="tab_zwei_panels">
+      <attribute name="title">
+       <string>Zwei Panels</string>
+      </attribute>
+      <layout class="QHBoxLayout" name="horizontalLayout_tab1">
+       <item>
+        <widget class="QGraphicsView" name="graphicsView_Auswahl_Rrohr1"/>
+       </item>
+       <item>
+        <widget class="QWidget" name="widget_mid_legend">
+         <layout class="QVBoxLayout" name="verticalLayout_legend">
+          <item>
+           <widget class="QLabel" name="lblLegende">
+            <property name="text">
+             <string>Legende: frei • verwendet • gesperrt • gemappt</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="verticalSpacer_mid">
+            <property name="orientation">
+             <enum>Qt::Vertical</enum>
+            </property>
+           </spacer>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGraphicsView" name="graphicsView_Auswahl_Rrohr2"/>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="tab_verbindungen">
+      <attribute name="title">
+       <string>Verbindungen</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="verticalLayout_tab2">
+       <item>
+        <widget class="QGraphicsView" name="graphicsView_Mapping"/>
+       </item>
+      </layout>
+     </widget>
+    </widget>
+   </item>
+   <item>
+    <widget class="QWidget" name="widget_row4">
+     <layout class="QHBoxLayout" name="horizontalLayout_row4">
+      <item>
+       <widget class="QPushButton" name="pushButton_automatisch">
+        <property name="text">
+         <string>Automatisch verbinden</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="pushButton_verbindung_loeschen">
+        <property name="text">
+         <string>Verbindungen löschen</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <spacer name="horizontalSpacer_row4">
+        <property name="orientation">
+         <enum>Qt::Horizontal</enum>
+        </property>
+       </spacer>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QTableWidget" name="tableWidget_Verbindung"/>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="grpAttribute">
+     <property name="title">
+      <string>Attribute Verbindung</string>
+     </property>
+     <layout class="QGridLayout" name="gridLayout_attr">
+      <item row="0" column="0">
+       <widget class="QLabel" name="label_name">
+        <property name="text">
+         <string>Name:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QLineEdit" name="lineEdit_Name"/>
+      </item>
+      <item row="0" column="2">
+       <widget class="QLabel" name="label_typ">
+        <property name="text">
+         <string>Typ:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="3">
+       <widget class="QComboBox" name="comboBox_Typ"/>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="label_bem">
+        <property name="text">
+         <string>Bemerkung:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1" colspan="3">
+       <widget class="QPlainTextEdit" name="plainTextEdit_Bemerkung"/>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QWidget" name="widget_row7">
+     <layout class="QHBoxLayout" name="horizontalLayout_row7">
+      <item>
+       <widget class="QPushButton" name="pushButton_Datenpruefung">
+        <property name="text">
+         <string>Daten prüfen</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="pushButton_Import">
+        <property name="text">
+         <string>Import</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <spacer name="horizontalSpacer_row7">
+        <property name="orientation">
+         <enum>Qt::Horizontal</enum>
+        </property>
+       </spacer>
+      </item>
+      <item>
+       <widget class="QDialogButtonBox" name="buttonBox">
+        <property name="standardButtons">
+         <set>QDialogButtonBox::Reset|QDialogButtonBox::Cancel</set>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections>
+  <connection>
+   <sender>buttonBox</sender>
+   <signal>rejected()</signal>
+   <receiver>LeerrohrVerbinderDialog</receiver>
+   <slot>reject()</slot>
+  </connection>
+ </connections>
+</ui>

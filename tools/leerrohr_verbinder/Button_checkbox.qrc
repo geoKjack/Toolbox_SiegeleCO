@@ -1,0 +1,7 @@
+<RCC>
+  <qresource prefix="/toggles">
+    <file>toggle_knob_left.svg</file>
+    <file>toggle_knob_right.svg</file>
+    <file>toggle_knob_disabled.svg</file>
+  </qresource>
+</RCC>

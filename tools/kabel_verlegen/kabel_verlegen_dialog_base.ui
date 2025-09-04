@@ -33,7 +33,7 @@
     <bool>false</bool>
    </property>
    <property name="currentIndex">
-    <number>1</number>
+    <number>0</number>
    </property>
    <widget class="QWidget" name="tab">
     <attribute name="title">
@@ -140,6 +140,16 @@ QToolBox::tab:selected { background-color: darkgrey; }</string>
        </property>
        <property name="text">
         <string>gewählter Kabeltyp:</string>
+       </property>
+      </widget>
+      <widget class="QListView" name="listView">
+       <property name="geometry">
+        <rect>
+         <x>0</x>
+         <y>60</y>
+         <width>501</width>
+         <height>321</height>
+        </rect>
        </property>
       </widget>
      </widget>
@@ -292,43 +302,14 @@ QToolBox::tab:selected { background-color: darkgrey; }</string>
         <string>Knoten wählen! (optional)</string>
        </property>
       </widget>
-      <widget class="QPushButton" name="pushButton_verlauf">
+      <widget class="QGraphicsView" name="graphicsView">
        <property name="geometry">
         <rect>
-         <x>40</x>
-         <y>230</y>
-         <width>141</width>
-         <height>25</height>
+         <x>0</x>
+         <y>170</y>
+         <width>501</width>
+         <height>261</height>
         </rect>
-       </property>
-       <property name="text">
-        <string>Zwischenknoten</string>
-       </property>
-      </widget>
-      <widget class="QPushButton" name="pushButton_Vorschau">
-       <property name="geometry">
-        <rect>
-         <x>50</x>
-         <y>280</y>
-         <width>141</width>
-         <height>25</height>
-        </rect>
-       </property>
-       <property name="text">
-        <string>Zwischenknoten</string>
-       </property>
-      </widget>
-      <widget class="QPushButton" name="pushButton_Datenpruefung">
-       <property name="geometry">
-        <rect>
-         <x>100</x>
-         <y>340</y>
-         <width>141</width>
-         <height>25</height>
-        </rect>
-       </property>
-       <property name="text">
-        <string>Zwischenknoten</string>
        </property>
       </widget>
      </widget>
@@ -337,8 +318,8 @@ QToolBox::tab:selected { background-color: darkgrey; }</string>
        <rect>
         <x>0</x>
         <y>0</y>
-        <width>100</width>
-        <height>30</height>
+        <width>501</width>
+        <height>429</height>
        </rect>
       </property>
       <attribute name="label">
@@ -480,8 +461,8 @@ QToolBox::tab:selected { background-color: darkgrey; }</string>
        <rect>
         <x>0</x>
         <y>0</y>
-        <width>100</width>
-        <height>30</height>
+        <width>501</width>
+        <height>429</height>
        </rect>
       </property>
       <attribute name="label">

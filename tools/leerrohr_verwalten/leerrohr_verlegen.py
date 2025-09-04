@@ -9,6 +9,7 @@ from qgis.gui import QgsHighlight
 from qgis.PyQt.QtGui import QColor, QBrush, QPen
 import psycopg2
 import datetime
+import json
 
 # Logging konfigurieren
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -1960,8 +1961,36 @@ class LeerrohrVerlegenTool(QDialog):
 
         print(f"DEBUG: Prüfe Daten – selected_trasse_ids_flat: {self.selected_trasse_ids_flat}")
 
+    def build_id_trasse_neu(self, cur):
+        """Berechnet ID_TRASSE_NEU als JSONB-String aus selected_trasse_ids_flat, mit reverse basierend auf Knoten."""
+        print("DEBUG: Starte build_id_trasse_neu")
+        start_knoten = self.selected_verteiler
+        current_knoten = start_knoten
+        id_trasse_neu_list = []
+        index = 1
+        for trasse_id in self.selected_trasse_ids_flat:
+            cur.execute("""
+                SELECT "VONKNOTEN", "NACHKNOTEN" FROM lwl."LWL_Trasse" WHERE id = %s
+            """, (trasse_id,))
+            result = cur.fetchone()
+            if not result:
+                raise Exception(f"Trasse-ID {trasse_id} nicht gefunden.")
+            von_knoten, nach_knoten = result
+            reverse = von_knoten != current_knoten
+            id_trasse_neu_list.append({
+                "id": int(trasse_id),
+                "index": index,
+                "reverse": reverse
+            })
+            current_knoten = nach_knoten if not reverse else von_knoten
+            index += 1
+        id_trasse_neu_json = json.dumps(id_trasse_neu_list)
+        print(f"DEBUG: ID_TRASSE_NEU: {id_trasse_neu_json}")
+        return id_trasse_neu_json
+        return id_trasse_neu_json
+
     def importiere_daten(self):
-        """Importiert die Daten aus dem Formular in die Tabelle lwl.LWL_Leerrohr oder lwl.LWL_Leerrohr_Abzweigung, berücksichtigt Codierung statt Farbschema."""
+        """Importiert die Daten aus dem Formular in die Tabelle lwl.LWL_Leerrohr oder lwl.LWL_Leerrohr_Abzweigung."""
         print("DEBUG: Starte importiere_daten")
         conn = None
         try:
@@ -1971,7 +2000,6 @@ class LeerrohrVerlegenTool(QDialog):
             cur = conn.cursor()
             conn.autocommit = False
             print("DEBUG: Datenbankverbindung erfolgreich")
-
             if self.ui.radioButton_Abzweigung.isChecked():
                 print("DEBUG: Abzweigungsmodus aktiviert")
                 trassen_ids_pg_array = "{" + ",".join(map(str, self.selected_trasse_ids_flat)) + "}"
@@ -1982,18 +2010,16 @@ class LeerrohrVerlegenTool(QDialog):
                 hilfsknoten_id = self.selected_verteiler
                 nach_knoten = self.selected_verteiler_2
                 print(f"DEBUG: Abzweigung-Daten - Trassen: {trassen_ids_pg_array}, Parent: {parent_id}, Hilfsknoten: {hilfsknoten_id}, Nachknoten: {nach_knoten}")
-
-                cur.execute(""" 
-                    SELECT COUNT(*) FROM lwl."LWL_Leerrohr_Abzweigung" 
+                cur.execute("""
+                    SELECT COUNT(*) FROM lwl."LWL_Leerrohr_Abzweigung"
                     WHERE "ID_PARENT_LEERROHR" = %s AND "ID_HILFSKNOTEN" = %s AND "NACHKNOTEN" = %s
                 """, (parent_id, hilfsknoten_id, nach_knoten))
                 exists = cur.fetchone()[0]
                 if exists > 0:
                     raise Exception("Diese Abzweigung existiert bereits.")
-
                 insert_query = """
                 INSERT INTO lwl."LWL_Leerrohr_Abzweigung" (
-                    "ID_PARENT_LEERROHR", "ID_HILFSKNOTEN", "ID_TRASSE", "COUNT", 
+                    "ID_PARENT_LEERROHR", "ID_HILFSKNOTEN", "ID_TRASSE", "COUNT",
                     "VERFUEGBARE_ROHRE", "STATUS"
                 ) VALUES (%s, %s, %s::bigint[], %s, %s, %s)
                 """
@@ -2002,6 +2028,8 @@ class LeerrohrVerlegenTool(QDialog):
                 print(f"DEBUG: Abzweigung eingefügt, Rows affected: {cur.rowcount}")
             else:
                 print("DEBUG: Hauptstrang-Modus aktiviert")
+                # Berechne ID_TRASSE_NEU als JSONB
+                id_trasse_neu_json = self.build_id_trasse_neu(cur)
                 trassen_ids_pg_array = "{" + ",".join(map(str, set(self.selected_trasse_ids_flat))) + "}"
                 verbundnummer = self.ui.comboBox_Verbundnummer.currentText().strip()
                 status = "aktiv"
@@ -2017,8 +2045,7 @@ class LeerrohrVerlegenTool(QDialog):
                 kommentar = self.ui.label_Kommentar.text().strip() or None
                 beschreibung = self.ui.label_Kommentar_2.text().strip() or None
                 verlegt_am = self.ui.mDateTimeEdit_Strecke.date().toString("yyyy-MM-dd")
-
-                # NEU: Summe der "anzahl"-Werte aus JSONB-Array mit LATERAL, korrekte Typumwandlung
+                # Summe der "anzahl"-Werte aus JSONB-Array
                 cur.execute("""
                     SELECT SUM((rohr->>'anzahl')::int) AS rohr_anzahl
                     FROM lwl."LUT_Leerrohr_SubTyp" t,
@@ -2026,37 +2053,32 @@ class LeerrohrVerlegenTool(QDialog):
                     WHERE t."id" = %s
                 """, (subtyp_id,))
                 result = cur.fetchone()
-                rohr_anzahl = int(result[0]) if result and result[0] else 1  # Fallback auf 1
+                rohr_anzahl = int(result[0]) if result and result[0] else 1
                 if rohr_anzahl > 1:
                     verfuegbare_rohre = "{" + ",".join(map(str, range(1, rohr_anzahl + 1))) + "}"
                 else:
                     verfuegbare_rohre = None
-
-                print(f"DEBUG: Hauptstrang-Daten - Trassen: {trassen_ids_pg_array}, Verbundnummer: {verbundnummer}, Typ: {typ}, Codierung: {codierung}, Subtyp: {subtyp_id}, Firma: {firma_hersteller}, Verfuegbare_Rohre: {verfuegbare_rohre}")
-
+                print(f"DEBUG: Hauptstrang-Daten - ID_TRASSE_NEU: {id_trasse_neu_json}, Trassen: {trassen_ids_pg_array}, Verbundnummer: {verbundnummer}, Typ: {typ}, Codierung: {codierung}, Subtyp: {subtyp_id}, Firma: {firma_hersteller}, Verfuegbare_Rohre: {verfuegbare_rohre}")
                 if verbundnummer == "Deaktiviert" or not verbundnummer:
                     verbundnummer = "0" if typ != 3 else None
-
                 insert_query = """
                 INSERT INTO lwl."LWL_Leerrohr" (
-                    "ID_TRASSE", "VERBUNDNUMMER", "VERFUEGBARE_ROHRE", "STATUS", "VKG_LR", 
-                    "GEFOERDERT", "SUBDUCT", "PARENT_LEERROHR_ID", "TYP", "CODIERUNG", "SUBTYP", 
+                    "ID_TRASSE", "ID_TRASSE_NEU", "VERBUNDNUMMER", "VERFUEGBARE_ROHRE", "STATUS", "VKG_LR",
+                    "GEFOERDERT", "SUBDUCT", "PARENT_LEERROHR_ID", "TYP", "CODIERUNG", "SUBTYP",
                     "FIRMA_HERSTELLER", "VONKNOTEN", "NACHKNOTEN", "KOMMENTAR", "BESCHREIBUNG", "VERLEGT_AM"
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """
                 values = (
-                    trassen_ids_pg_array, verbundnummer, verfuegbare_rohre, status, vonknoten,
+                    trassen_ids_pg_array, id_trasse_neu_json, verbundnummer, verfuegbare_rohre, status, vonknoten,
                     gefoerdert, subduct, parent_leerrohr_id, typ, codierung, subtyp_id,
                     firma_hersteller, vonknoten, nachknoten, kommentar, beschreibung, verlegt_am
                 )
                 cur.execute(insert_query, values)
                 print(f"DEBUG: Hauptstrang eingefügt, Rows affected: {cur.rowcount}")
-
             conn.commit()
             print("DEBUG: Commit erfolgreich")
             self.iface.messageBar().pushMessage("Erfolg", "Daten erfolgreich importiert.", level=Qgis.Success)
             self.initialisiere_formular()
-
         except psycopg2.Error as e:
             if conn:
                 conn.rollback()
@@ -2067,12 +2089,10 @@ class LeerrohrVerlegenTool(QDialog):
                 conn.rollback()
             self.iface.messageBar().pushMessage("Fehler", f"Allgemeiner Fehler: {str(e)}", level=Qgis.Critical)
             print(f"DEBUG: Allgemeiner Fehler: {str(e)}")
-
         finally:
             if conn:
                 conn.close()
                 print("DEBUG: Verbindung geschlossen")
-
         layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr")[0]
         if layer:
             layer.triggerRepaint()

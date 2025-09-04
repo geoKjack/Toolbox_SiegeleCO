@@ -1,0 +1,483 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>KabelVerlegungsToolDialogBase</class>
+ <widget class="QDialog" name="KabelVerlegungsToolDialogBase">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>593</width>
+    <height>878</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Leerrohr Verbinden</string>
+  </property>
+  <widget class="QTabWidget" name="tabWidget">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>611</width>
+     <height>831</height>
+    </rect>
+   </property>
+   <property name="font">
+    <font>
+     <weight>50</weight>
+     <italic>false</italic>
+     <bold>false</bold>
+    </font>
+   </property>
+   <property name="autoFillBackground">
+    <bool>false</bool>
+   </property>
+   <property name="currentIndex">
+    <number>0</number>
+   </property>
+   <widget class="QWidget" name="tab">
+    <attribute name="title">
+     <string>Leerohr Verbinden</string>
+    </attribute>
+    <widget class="QToolBox" name="toolBox">
+     <property name="geometry">
+      <rect>
+       <x>0</x>
+       <y>293</y>
+       <width>591</width>
+       <height>451</height>
+      </rect>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">QToolBox::tab { background-color: lightgreen; }
+QToolBox::tab:selected { background-color: darkgrey; }</string>
+     </property>
+     <property name="currentIndex">
+      <number>0</number>
+     </property>
+     <widget class="QWidget" name="page">
+      <property name="geometry">
+       <rect>
+        <x>0</x>
+        <y>0</y>
+        <width>591</width>
+        <height>395</height>
+       </rect>
+      </property>
+      <attribute name="label">
+       <string>Verbindung erstellen</string>
+      </attribute>
+      <widget class="QGraphicsView" name="graphicsView_Auswahl_Rrohr1">
+       <property name="geometry">
+        <rect>
+         <x>0</x>
+         <y>0</y>
+         <width>591</width>
+         <height>391</height>
+        </rect>
+       </property>
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+      </widget>
+     </widget>
+     <widget class="QWidget" name="page_3">
+      <property name="geometry">
+       <rect>
+        <x>0</x>
+        <y>0</y>
+        <width>591</width>
+        <height>395</height>
+       </rect>
+      </property>
+      <attribute name="label">
+       <string>Tabellarische Ansicht</string>
+      </attribute>
+      <widget class="QListWidget" name="listWidget_Verbindungen">
+       <property name="geometry">
+        <rect>
+         <x>0</x>
+         <y>0</y>
+         <width>591</width>
+         <height>391</height>
+        </rect>
+       </property>
+      </widget>
+     </widget>
+    </widget>
+    <widget class="QLabel" name="label_Status">
+     <property name="geometry">
+      <rect>
+       <x>0</x>
+       <y>752</y>
+       <width>591</width>
+       <height>53</height>
+      </rect>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">padding-left: 10px; padding-top: 5px;</string>
+     </property>
+     <property name="frameShape">
+      <enum>QFrame::Box</enum>
+     </property>
+     <property name="text">
+      <string/>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="pushButton_verbindung">
+     <property name="geometry">
+      <rect>
+       <x>0</x>
+       <y>3</y>
+       <width>191</width>
+       <height>25</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Verbindung Wählen</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_gewaehltes_leerrohr1">
+     <property name="geometry">
+      <rect>
+       <x>0</x>
+       <y>233</y>
+       <width>231</width>
+       <height>22</height>
+      </rect>
+     </property>
+     <property name="autoFillBackground">
+      <bool>false</bool>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">background-color: lightcoral;</string>
+     </property>
+     <property name="inputMethodHints">
+      <set>Qt::ImhNone</set>
+     </property>
+     <property name="frameShape">
+      <enum>QFrame::Box</enum>
+     </property>
+     <property name="frameShadow">
+      <enum>QFrame::Plain</enum>
+     </property>
+     <property name="lineWidth">
+      <number>1</number>
+     </property>
+     <property name="text">
+      <string>Gewähltes Leerrohr 1</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="pushButton_verbindung_loeschen">
+     <property name="geometry">
+      <rect>
+       <x>150</x>
+       <y>263</y>
+       <width>141</width>
+       <height>22</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Verbindungen löschen</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="pushButton_leerrohr1">
+     <property name="geometry">
+      <rect>
+       <x>0</x>
+       <y>178</y>
+       <width>191</width>
+       <height>25</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Über Karte wählen</string>
+     </property>
+    </widget>
+    <widget class="QListWidget" name="listWidget_Leerohr1">
+     <property name="geometry">
+      <rect>
+       <x>0</x>
+       <y>102</y>
+       <width>251</width>
+       <height>71</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="pushButton_leerrohr2">
+     <property name="geometry">
+      <rect>
+       <x>400</x>
+       <y>178</y>
+       <width>191</width>
+       <height>25</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Über Karte wählen</string>
+     </property>
+    </widget>
+    <widget class="QListWidget" name="listWidget_Leerohr2">
+     <property name="geometry">
+      <rect>
+       <x>350</x>
+       <y>102</y>
+       <width>241</width>
+       <height>71</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_gewaehltes_leerrohr2">
+     <property name="geometry">
+      <rect>
+       <x>360</x>
+       <y>233</y>
+       <width>231</width>
+       <height>22</height>
+      </rect>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">background-color: lightcoral;</string>
+     </property>
+     <property name="frameShape">
+      <enum>QFrame::Box</enum>
+     </property>
+     <property name="text">
+      <string>Gewähltes Leerrohr 2</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="pushButton_automatisch">
+     <property name="geometry">
+      <rect>
+       <x>0</x>
+       <y>263</y>
+       <width>141</width>
+       <height>22</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Automatisch verbinden</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="pushButton_Knoten">
+     <property name="geometry">
+      <rect>
+       <x>0</x>
+       <y>33</y>
+       <width>191</width>
+       <height>25</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Knoten wählen</string>
+     </property>
+    </widget>
+    <widget class="QComboBox" name="comboBox_AktivLR2">
+     <property name="geometry">
+      <rect>
+       <x>360</x>
+       <y>207</y>
+       <width>231</width>
+       <height>22</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QComboBox" name="comboBox_AktivLR1">
+     <property name="geometry">
+      <rect>
+       <x>0</x>
+       <y>207</y>
+       <width>231</width>
+       <height>22</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QComboBox" name="comboBox_StatusGlobal">
+     <property name="geometry">
+      <rect>
+       <x>360</x>
+       <y>263</y>
+       <width>231</width>
+       <height>22</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="pushButton_Auswahl">
+     <property name="geometry">
+      <rect>
+       <x>260</x>
+       <y>102</y>
+       <width>81</width>
+       <height>71</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Auswahl 
+Bestätigt</string>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="checkBox_2">
+     <property name="geometry">
+      <rect>
+       <x>410</x>
+       <y>69</y>
+       <width>121</width>
+       <height>31</height>
+      </rect>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">#checkBox_1, #checkBox_2 { spacing: 6px; }
+
+/* Track */
+#checkBox_1::indicator, #checkBox_2::indicator {
+  width: 30px; height: 15px;
+  border-radius: 6px;
+  border: 1px solid #b0b0b0;
+  background: #cfcfcf;
+}
+
+#checkBox_1::indicator:checked, #checkBox_2::indicator:checked {
+  background: #4caf50;
+  border-color: #3a9a3e;
+}
+
+/* Knopf-Bild aus Ressource */
+#checkBox_1::indicator:unchecked, #checkBox_2::indicator:unchecked {
+  image: url(:/toggles/toggle_knob_left.svg);
+}
+#checkBox_1::indicator:checked, #checkBox_2::indicator:checked {
+  image: url(:/toggles/toggle_knob_right.svg);
+}
+</string>
+     </property>
+     <property name="text">
+      <string>CheckBox</string>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="checkBox_1">
+     <property name="geometry">
+      <rect>
+       <x>100</x>
+       <y>69</y>
+       <width>121</width>
+       <height>31</height>
+      </rect>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">#checkBox_1, #checkBox_2 { spacing: 6px; }
+
+/* Track */
+#checkBox_1::indicator, #checkBox_2::indicator {
+  width: 30px; height: 15px;
+  border-radius: 6px;
+  border: 1px solid #b0b0b0;
+  background: #cfcfcf;
+}
+
+#checkBox_1::indicator:checked, #checkBox_2::indicator:checked {
+  background: #4caf50;
+  border-color: #3a9a3e;
+}
+
+/* Knopf-Bild aus Ressource */
+#checkBox_1::indicator:unchecked, #checkBox_2::indicator:unchecked {
+  image: url(:/toggles/toggle_knob_left.svg);
+}
+#checkBox_1::indicator:checked, #checkBox_2::indicator:checked {
+  image: url(:/toggles/toggle_knob_right.svg);
+}
+</string>
+     </property>
+     <property name="text">
+      <string>CheckBox</string>
+     </property>
+    </widget>
+    <widget class="QListWidget" name="listWidget_Leerohr1_2">
+     <property name="geometry">
+      <rect>
+       <x>200</x>
+       <y>0</y>
+       <width>391</width>
+       <height>61</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="pushButton_PDF">
+     <property name="geometry">
+      <rect>
+       <x>299</x>
+       <y>263</y>
+       <width>51</width>
+       <height>22</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>PDF</string>
+     </property>
+    </widget>
+   </widget>
+  </widget>
+  <widget class="QPushButton" name="pushButton_Import">
+   <property name="enabled">
+    <bool>false</bool>
+   </property>
+   <property name="geometry">
+    <rect>
+     <x>305</x>
+     <y>843</y>
+     <width>84</width>
+     <height>23</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>Import</string>
+   </property>
+  </widget>
+  <widget class="QDialogButtonBox" name="button_box">
+   <property name="geometry">
+    <rect>
+     <x>3</x>
+     <y>840</y>
+     <width>581</width>
+     <height>30</height>
+    </rect>
+   </property>
+   <property name="orientation">
+    <enum>Qt::Horizontal</enum>
+   </property>
+   <property name="standardButtons">
+    <set>QDialogButtonBox::Cancel|QDialogButtonBox::Reset</set>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="pushButton_Datenpruefung">
+   <property name="geometry">
+    <rect>
+     <x>211</x>
+     <y>843</y>
+     <width>84</width>
+     <height>23</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>Daten Prüfen</string>
+   </property>
+  </widget>
+  <zorder>button_box</zorder>
+  <zorder>pushButton_Datenpruefung</zorder>
+  <zorder>tabWidget</zorder>
+  <zorder>pushButton_Import</zorder>
+ </widget>
+ <resources>
+  <include location="Button_checkbox.qrc"/>
+ </resources>
+ <connections/>
+</ui>

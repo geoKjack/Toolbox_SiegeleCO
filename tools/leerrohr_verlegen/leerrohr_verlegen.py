@@ -537,7 +537,7 @@ class LeerrohrVerlegenTool(QDialog):
         request = QgsFeatureRequest().setFilterRect(buffer.boundingBox())
 
         for feature in layer.getFeatures(request):
-            if feature["TYP"] not in ["Verteilerkasten", "Schacht", "Ortszentrale"]:
+            if feature["TYP"] not in ["Verteilerkasten", "Schacht", "Ortszentrale", "Hilfsknoten"]:
                 continue
             distance = feature.geometry().distance(QgsGeometry.fromPointXY(point))
             if distance < nearest_distance:
@@ -1184,8 +1184,8 @@ class LeerrohrVerlegenTool(QDialog):
                         # Validierung der Knoten-Typen
                         cur.execute("SELECT \"TYP\" FROM lwl.\"LWL_Knoten\" WHERE id = %s", (start_id,))
                         typ = cur.fetchone()
-                        if not typ or typ[0] not in ["Verteilerkasten", "Schacht", "Ortszentrale"]:
-                            self._set_status("Der Startknoten der Abzweigung muss ein Verteiler, Schacht oder eine Ortszentrale sein!", error=True)
+                        if not typ or typ[0] not in ["Verteilerkasten", "Schacht", "Ortszentrale", "Hilfsknoten"]:
+                            self._set_status("Der Startknoten der Abzweigung muss ein Verteiler, Schacht, Hilfsknoten oder eine Ortszentrale sein!", error=True)
                             return
                         cur.execute("SELECT \"TYP\" FROM lwl.\"LWL_Knoten\" WHERE id = %s", (end_id,))
                         typ = cur.fetchone()
@@ -1218,7 +1218,7 @@ class LeerrohrVerlegenTool(QDialog):
                     with conn.cursor() as cur:
                         cur.execute("SELECT \"TYP\" FROM lwl.\"LWL_Knoten\" WHERE id = %s", (start_id,))
                         typ = cur.fetchone()
-                        if not typ or typ[0] not in ["Verteilerkasten", "Schacht", "Ortszentrale"]:
+                        if not typ or typ[0] not in ["Verteilerkasten", "Schacht", "Ortszentrale", "Hilfsknoten"]:
                             self._set_status("Der Startknoten des Hauptstrangs muss ein Verteiler, Schacht oder eine Ortszentrale sein!", error=True)
                             return
                         cur.execute("SELECT \"TYP\" FROM lwl.\"LWL_Knoten\" WHERE id = %s", (end_id,))
@@ -1613,7 +1613,7 @@ class LeerrohrVerlegenTool(QDialog):
                                 SELECT DISTINCT "VERBUNDNUMMER"
                                 FROM lwl."LWL_Leerrohr"
                                 WHERE "TYP" = 3 
-                                AND "VKG_LR" = %s
+                                AND %s::bigint = ANY("VKG_LR")
                                 AND "VERBUNDNUMMER" IS NOT NULL
                                 AND "id" != %s
                             """, (startknoten, exclude_id))
@@ -1622,7 +1622,7 @@ class LeerrohrVerlegenTool(QDialog):
                                 SELECT DISTINCT "VERBUNDNUMMER"
                                 FROM lwl."LWL_Leerrohr"
                                 WHERE "TYP" = 3 
-                                AND "VKG_LR" = %s
+                                AND %s::bigint = ANY("VKG_LR")
                                 AND "VERBUNDNUMMER" IS NOT NULL
                             """, (startknoten,))
                     else:
@@ -2070,7 +2070,7 @@ class LeerrohrVerlegenTool(QDialog):
                                 SELECT DISTINCT "VERBUNDNUMMER"
                                 FROM lwl."LWL_Leerrohr"
                                 WHERE "TYP" = 3 
-                                AND "VKG_LR" = %s
+                                AND %s::bigint = ANY("VKG_LR")
                                 AND "VERBUNDNUMMER" IS NOT NULL
                                 AND "id" != %s
                             """, (self.selected_verteiler, exclude_id))
@@ -2079,7 +2079,7 @@ class LeerrohrVerlegenTool(QDialog):
                                 SELECT DISTINCT "VERBUNDNUMMER"
                                 FROM lwl."LWL_Leerrohr"
                                 WHERE "TYP" = 3 
-                                AND "VKG_LR" = %s
+                                AND %s::bigint = ANY("VKG_LR")
                                 AND "VERBUNDNUMMER" IS NOT NULL
                             """, (self.selected_verteiler,))
                         vorhandene_verbundnummern = {int(row[0]) for row in cur.fetchall() if row[0] is not None}
@@ -2172,7 +2172,7 @@ class LeerrohrVerlegenTool(QDialog):
                     SELECT DISTINCT "VERBUNDNUMMER"
                     FROM lwl."LWL_Leerrohr"
                     WHERE "TYP" = 3 
-                    AND "VKG_LR" = %s
+                    AND %s::bigint = ANY("VKG_LR")
                     AND "VERBUNDNUMMER" IS NOT NULL
                 """, (self.selected_verteiler,))
                 verwendete_nummern = {int(row[0]) for row in cur.fetchall() if row[0] is not None}
@@ -2183,12 +2183,15 @@ class LeerrohrVerlegenTool(QDialog):
             if self.ui.radioButton_Abzweigung.isChecked():
                 print("DEBUG: Abzweigungsmodus aktiviert")
                 trassen_ids_pg_array = "{" + ",".join(map(str, self.selected_trasse_ids_flat)) + "}"
-                count = self.selected_parent_leerrohr.get("COUNT", 0) or 0
-                status = status_id if status_id is not None else self.selected_parent_leerrohr.get("STATUS", 1)  # Nutze Dropdown oder Fallback
+                # COUNT aus Parent übernehmen? (hier: count_value=0, Trigger/Update kann später setzen)
+                status = status_id if status_id is not None else self.selected_parent_leerrohr.get("STATUS", 1)
                 verfuegbare_rohre = self.selected_parent_leerrohr.get("VERFUEGBARE_ROHRE", "{1,2,3}")
                 parent_id = self.selected_parent_leerrohr["id"]
                 hilfsknoten_id = self.selected_verteiler
                 nach_knoten = self.selected_verteiler_2
+                # WICHTIG: VKG_LR von Parent erben (nicht vom Hilfsknoten!)
+                parent_vkg_lr = self.selected_parent_leerrohr.get("VKG_LR", None)
+
                 for subtyp_id, typ, codierung, id_codierung in selected_subtyp_ids:
                     # Im Abzweigungs-Modus: Quantity=1 (keine Duplizierung)
                     cur.execute(""" 
@@ -2206,7 +2209,9 @@ class LeerrohrVerlegenTool(QDialog):
                     """
                     values = (
                         parent_id, hilfsknoten_id, trassen_ids_pg_array, count_value, status,
-                        verfuegbare_rohre, typ, codierung, id_codierung, subtyp_id, self.selected_verteiler, hilfsknoten_id, nach_knoten
+                        verfuegbare_rohre, typ, codierung, id_codierung, subtyp_id,
+                        parent_vkg_lr,  # geerbter VKG_LR
+                        hilfsknoten_id, nach_knoten
                     )
                     cur.execute(insert_query, values)
                     print(f"DEBUG: Abzweigung eingefügt, Rows affected: {cur.rowcount}, COUNT: {count_value}, STATUS: {status}, ID_CODIERUNG: {id_codierung}")
@@ -2239,7 +2244,6 @@ class LeerrohrVerlegenTool(QDialog):
                     id_trasse_jsonb = json.dumps(trasse_list)
                     print(f"DEBUG: ID_TRASSE_NEU gebaut: {id_trasse_jsonb}")
                 trassen_ids_pg_array = "{" + ",".join(map(str, set(self.selected_trasse_ids_flat))) + "}" if self.selected_trasse_ids_flat else None
-                trassen_ids_pg_array = "{" + ",".join(map(str, set(self.selected_trasse_ids_flat))) + "}" if self.selected_trasse_ids_flat else None
                 status = status_id if status_id is not None else 1  # Nutze Dropdown oder Fallback
                 gefoerdert = self.ui.checkBox_Foerderung.isChecked()
                 subduct = self.ui.checkBox_Subduct.isChecked()
@@ -2270,15 +2274,23 @@ class LeerrohrVerlegenTool(QDialog):
                     for q in range(quantity):
                         # Für Hauptrohre (TYP=2) Verbundnummer auf 0 setzen
                         verbundnummer_final = "0" if typ != 3 else str(current_verbundnummer)
+
+                        # >>> NEU: VKG_LR nur setzen, wenn Start Verteiler/Schacht/Ortszentrale ist
+                        cur.execute('SELECT "TYP" FROM lwl."LWL_Knoten" WHERE id = %s', (vonknoten,))
+                        start_typ_row = cur.fetchone()
+                        start_typ = start_typ_row[0] if start_typ_row else None
+                        if start_typ in ["Verteilerkasten", "Schacht", "Ortszentrale"]:
+                            vkg_lr_value = vonknoten
+                        else:
+                            vkg_lr_value = None
+                        # <<< NEU
+
                         insert_query = """
                             INSERT INTO lwl."LWL_Leerrohr" (
-                                "ID_TRASSE", "ID_TRASSE_NEU", "VERBUNDNUMMER", "VERFUEGBARE_ROHRE", "STATUS", "COUNT", "VKG_LR", 
-                                "GEFOERDERT", "SUBDUCT", "PARENT_LEERROHR_ID", "TYP", "CODIERUNG", "ID_CODIERUNG", "SUBTYP", 
-                                "FIRMA_HERSTELLER", "VONKNOTEN", "NACHKNOTEN", "KOMMENTAR", "BESCHREIBUNG", "VERLEGT_AM"
-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                "ID_TRASSE", "ID_TRASSE_NEU", "VERBUNDNUMMER", "VERFUEGBARE_ROHRE", "STATUS", "COUNT", "GEFOERDERT", "SUBDUCT", "PARENT_LEERROHR_ID", "TYP", "CODIERUNG", "ID_CODIERUNG", "SUBTYP", "FIRMA_HERSTELLER", "VONKNOTEN", "NACHKNOTEN", "KOMMENTAR", "BESCHREIBUNG", "VERLEGT_AM") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """
                         values = (
-                            trassen_ids_pg_array or '{}', id_trasse_jsonb or '{}', verbundnummer_final, verfuegbare_rohre, status, count_value, vonknoten,
+                            trassen_ids_pg_array or '{}', id_trasse_jsonb or '{}', verbundnummer_final, verfuegbare_rohre, status, count_value, 
                             gefoerdert, subduct, parent_leerrohr_id, typ, codierung, id_codierung, subtyp_id,
                             firma_hersteller, vonknoten, nachknoten, kommentar, beschreibung, verlegt_am
                         )
@@ -2357,8 +2369,7 @@ class LeerrohrVerlegenTool(QDialog):
                     for i, tid in enumerate(self.selected_trasse_ids_flat):
                         reverse = False  # Default: Vorwärts
                         # Beispiel-Logik für Sackstich: Setze reverse=true für Rückwege (ab der Hälfte der Liste)
-                        # Passe das an deine echte Routing-Logik an (z. B. prüfe Knoten-Richtung oder Pfad-Richtung)
-                        if i >= num_trassen // 2:  # Einfaches Beispiel: Rückweg ab Mitte (für symmetrische Sackstiche)
+                        if i >= num_trassen // 2:  # Einfaches Beispiel
                             reverse = True
                         trasse_list.append({
                             "index": i + 1,
@@ -2383,7 +2394,7 @@ class LeerrohrVerlegenTool(QDialog):
             verbundnummer = self.ui.comboBox_Verbundnummer.currentText().strip()
             count_value = int(self.ui.comboBox_Countwert.currentText())
             status_id = self.ui.comboBox_Status.currentData()  # Holt die ID des ausgewählten Status
-            status = status_id if status_id is not None else 1  # Fallback auf 1, falls kein Status ausgewählt
+            status = status_id if status_id is not None else 1  # Fallback
             gefoerdert = self.ui.checkBox_Foerderung.isChecked()
             subduct = self.ui.checkBox_Subduct.isChecked()
             parent_leerrohr_id = self.selected_subduct_parent if subduct else None
@@ -2392,6 +2403,16 @@ class LeerrohrVerlegenTool(QDialog):
             kommentar = self.ui.label_Kommentar.text().strip() or None
             beschreibung = self.ui.label_Kommentar_2.text().strip() or None
             verlegt_am = self.ui.mDateTimeEdit_Strecke.date().toString("yyyy-MM-dd")
+
+            # >>> NEU: VKG_LR bedingt setzen — nur wenn Startknoten Verteiler/Schacht/OZ ist
+            cur.execute('SELECT "TYP" FROM lwl."LWL_Knoten" WHERE id = %s', (vonknoten,))
+            start_typ_row = cur.fetchone()
+            start_typ = start_typ_row[0] if start_typ_row else None
+            if start_typ in ["Verteilerkasten", "Schacht", "Ortszentrale"]:
+                vkg_lr_value = vonknoten
+            else:
+                vkg_lr_value = None
+            # <<< NEU
 
             for subtyp_id, typ in selected_subtyp_ids:
                 cur.execute("""
@@ -2417,7 +2438,6 @@ class LeerrohrVerlegenTool(QDialog):
                             "VERFUEGBARE_ROHRE" = %s,
                             "STATUS" = %s,
                             "COUNT" = %s,
-                            "VKG_LR" = %s,
                             "GEFOERDERT" = %s,
                             "SUBDUCT" = %s,
                             "PARENT_LEERROHR_ID" = %s,
@@ -2432,7 +2452,7 @@ class LeerrohrVerlegenTool(QDialog):
                         WHERE "id" = %s
                     """
                     values = (
-                        trassen_ids_pg_array, id_trasse_jsonb, verbundnummer_final, verfuegbare_rohre, status, count_value, vonknoten,
+                        trassen_ids_pg_array, id_trasse_jsonb, verbundnummer_final, verfuegbare_rohre, status, count_value, 
                         gefoerdert, subduct, parent_leerrohr_id, typ, subtyp_id,
                         vonknoten, nachknoten, kommentar, beschreibung, verlegt_am,
                         geom_wkt, self.selected_leerrohr["id"]
@@ -2447,7 +2467,6 @@ class LeerrohrVerlegenTool(QDialog):
                             "VERFUEGBARE_ROHRE" = %s,
                             "STATUS" = %s,
                             "COUNT" = %s,
-                            "VKG_LR" = %s,
                             "GEFOERDERT" = %s,
                             "SUBDUCT" = %s,
                             "PARENT_LEERROHR_ID" = %s,
@@ -2461,7 +2480,7 @@ class LeerrohrVerlegenTool(QDialog):
                         WHERE "id" = %s
                     """
                     values = (
-                        verbundnummer_final, verfuegbare_rohre, status, count_value, vonknoten,
+                        verbundnummer_final, verfuegbare_rohre, status, count_value, 
                         gefoerdert, subduct, parent_leerrohr_id, typ, subtyp_id,
                         vonknoten, nachknoten, kommentar, beschreibung, verlegt_am,
                         self.selected_leerrohr["id"]

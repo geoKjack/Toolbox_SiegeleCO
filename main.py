@@ -5,6 +5,7 @@ from PyQt5.QtCore import Qt, QSettings
 from . import resources
 from .tools.leerrohr_verlegen.leerrohr_verlegen import LeerrohrVerlegenTool
 from .tools.hauseinfuehrung_verlegen.hauseinfuehrung_verlegen import HauseinfuehrungsVerlegungsTool
+from .tools.leerrohr_verbinder.leerrohr_verbinden import LeerrohrVerbindenTool
 import logging
 
 import sys, sip
@@ -116,9 +117,17 @@ class ToolBoxSiegeleCoPlugin:
 
     def run_leerrohrverbinden_tool(self):
         if not self.settings.value("name"):
-            self.iface.messageBar().pushMessage("Fehler", "Bitte wählen Sie zuerst ein Setup im Setup-Tool aus aus!", level=Qgis.Critical)
+            self.iface.messageBar().pushMessage("Fehler", "Bitte wählen Sie zuerst ein Setup im Setup-Tool aus!", level=Qgis.Critical)
             return
-        self.iface.messageBar().pushMessage("Leerrohr Verwalten Tool aktiviert", level=Qgis.Info)
+
+        if LeerrohrVerbindenTool.instance is not None:
+            LeerrohrVerbindenTool.instance.raise_()
+            LeerrohrVerbindenTool.instance.activateWindow()
+            return
+
+        self.leerrohrverbinden_dlg = LeerrohrVerbindenTool(self.iface)
+        self.leerrohrverbinden_dlg.show()
+
 
     def run_kabel_verlegen(self):
         if not self.settings.value("name"):
