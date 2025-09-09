@@ -1967,7 +1967,7 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
             farbe = None
             vkg_lr = self.gewaehlter_verteiler
             adresspunkt_id = None if self.ui.checkBox_aufschlieung.isChecked() else self.gewaehlte_adresse
-            adrcd = -1 if self.ui.checkBox_aufschlieung.isChecked() else self.gewaehlter_adrcd  # Setze -1 bei checked
+            adrcd = -1 if self.ui.checkBox_aufschlieung.isChecked() else self.gewaehlter_adrcd
             befestigt = self.ui.checkBox_Befestigt.isChecked()
 
             verlegt_am = None
@@ -1992,8 +1992,7 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
 
             if self.edit_mode:
                 neue_rohrnummer = self.gewaehlte_rohrnummer
-                alte_rohrnummer = None
-                cur.execute("SELECT \"ROHRNUMMER\" FROM \"lwl\".\"LWL_Hauseinfuehrung\" WHERE \"id\" = %s", (self.selected_ha_id,))
+                cur.execute('SELECT "ROHRNUMMER" FROM "lwl"."LWL_Hauseinfuehrung" WHERE "id" = %s', (self.selected_ha_id,))
                 alte_rohrnummer = cur.fetchone()[0]
 
                 if neue_rohrnummer != alte_rohrnummer:
@@ -2001,16 +2000,14 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
                         query_belegte_rohre = """
                             SELECT DISTINCT ha."ROHRNUMMER"
                             FROM "lwl"."LWL_Hauseinfuehrung" ha
-                            WHERE ha."ID_ABZWEIGUNG" = %s
-                            AND ha."VKG_LR" = %s
+                            WHERE ha."ID_ABZWEIGUNG" = %s AND ha."VKG_LR" = %s
                         """
                         cur.execute(query_belegte_rohre, (self.abzweigung_id, self.gewaehlter_verteiler))
                     else:
                         query_belegte_rohre = """
                             SELECT DISTINCT ha."ROHRNUMMER"
                             FROM "lwl"."LWL_Hauseinfuehrung" ha
-                            WHERE ha."ID_LEERROHR" = %s
-                            AND ha."VKG_LR" = %s
+                            WHERE ha."ID_LEERROHR" = %s AND ha."VKG_LR" = %s
                         """
                         cur.execute(query_belegte_rohre, (self.startpunkt_id, self.gewaehlter_verteiler))
                     belegte_rohre = [row[0] for row in cur.fetchall()]
@@ -2030,172 +2027,41 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
 
                         if anderes_ha_id != self.selected_ha_id:
                             cur.execute("BEGIN")
-                            cur.execute("""
-                                UPDATE "lwl"."LWL_Hauseinfuehrung"
-                                SET "ROHRNUMMER" = NULL
-                                WHERE "id" = %s
-                            """, (anderes_ha_id,))
-                            cur.execute("""
-                                UPDATE "lwl"."LWL_Hauseinfuehrung"
-                                SET "ROHRNUMMER" = %s
-                                WHERE "id" = %s
-                            """, (neue_rohrnummer, self.selected_ha_id))
-                            cur.execute("""
-                                UPDATE "lwl"."LWL_Hauseinfuehrung"
-                                SET "ROHRNUMMER" = %s
-                                WHERE "id" = %s
-                            """, (alte_rohrnummer, anderes_ha_id))
+                            cur.execute('UPDATE "lwl"."LWL_Hauseinfuehrung" SET "ROHRNUMMER" = NULL WHERE "id" = %s', (anderes_ha_id,))
+                            cur.execute('UPDATE "lwl"."LWL_Hauseinfuehrung" SET "ROHRNUMMER" = %s WHERE "id" = %s', (neue_rohrnummer, self.selected_ha_id))
+                            cur.execute('UPDATE "lwl"."LWL_Hauseinfuehrung" SET "ROHRNUMMER" = %s WHERE "id" = %s', (alte_rohrnummer, anderes_ha_id))
                             cur.execute("COMMIT")
                             self.iface.messageBar().pushMessage("Info", f"Rohrnummern getauscht (ID {anderes_ha_id}).", level=Qgis.Info)
 
-                cur.execute("""
-                    UPDATE "lwl"."LWL_Hauseinfuehrung"
-                    SET "KOMMENTAR" = %s, "BESCHREIBUNG" = %s, "GEFOERDERT" = %s, "STATUS" = %s,
-                        "VERLEGT_AM" = %s, "HA_ADRCD_SUBCD" = %s, "HA_ADRCD" = %s, "ROHRNUMMER" = %s, "BEFESTIGT" = %s
-                    WHERE "id" = %s
-                """, (kommentar, beschreibung, gefoerdert, status, verlegt_am, adresspunkt_id, adrcd, neue_rohrnummer, befestigt, self.selected_ha_id))
             else:
-                if self.direktmodus:
-                    rohrnummer = 0
-                    farbe = 'direkt'
-
-                    knoten_layer = QgsProject.instance().mapLayersByName("LWL_Knoten")[0]
-                    request = QgsFeatureRequest().setFilterExpression(f'"id" = {self.gewaehlter_verteiler}')
-                    features = list(knoten_layer.getFeatures(request))
-                    if not features or not features[0].geometry() or features[0].geometry().isEmpty():
-                        self.iface.messageBar().pushMessage("Fehler", "Verteilerkasten ohne Geometrie.", level=Qgis.Critical)
-                        return
-
-                    vkg_feature = features[0]
-                    points = self.erfasste_geom.asPolyline()
-                    if len(points) < 2:
-                        self.iface.messageBar().pushMessage("Fehler", "Die Linie muss mindestens zwei Punkte enthalten.", level=Qgis.Critical)
-                        return
-
-                    try:
-                        startpunkt = vkg_feature.geometry().asPoint()
-                        points[0] = startpunkt
-                    except Exception as e:
-                        self.iface.messageBar().pushMessage("Fehler", f"Geometrieproblem: {e}", level=Qgis.Critical)
-                        return
-
-                    self.erfasste_geom = QgsGeometry.fromPolylineXY(points)
-                    geom_wkt = self.erfasste_geom.asWkt()
-
-                    cur.execute("""
-                        INSERT INTO "lwl"."LWL_Hauseinfuehrung"
-                        (geom, "ID_LEERROHR", "KOMMENTAR", "BESCHREIBUNG", "ROHRNUMMER", "FARBE",
-                        "VKG_LR", "HA_ADRCD_SUBCD", "HA_ADRCD", "GEFOERDERT", "ID_KNOTEN", "id_AUFTRAGGEBER", "VERLEGT_AM", "STATUS", "BEFESTIGT")
-                        VALUES (ST_SetSRID(ST_GeomFromText(%s), 31254), NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        """, (
-                        geom_wkt,
-                        kommentar,
-                        beschreibung,
-                        rohrnummer,
-                        farbe,
-                        self.gewaehlter_verteiler,
-                        adresspunkt_id,
-                        adrcd,
-                        gefoerdert,
-                        self.gewaehlter_verteiler,
-                        auftraggeber_id,
-                        verlegt_am,
-                        status,
-                        befestigt
-                    ))
-
-                else:
-                    rohrnummer = self.gewaehlte_rohrnummer
-                    if hasattr(self, "gewaehlte_farb_id") and self.gewaehlte_farb_id is not None:
-                        subtyp_id_text = self.ui.label_subtyp.toPlainText().replace("SUBTYP: ", "")
-                        cur.execute(
-                            'SELECT "FARBE" FROM lwl."LUT_Farbe_Rohr" WHERE "ROHRNUMMER" = %s AND "ID_CODIERUNG" IN (SELECT "ID_CODIERUNG" FROM lwl."LUT_Leerrohr_SubTyp" WHERE "id" = %s)',
-                            (self.gewaehlte_rohrnummer, subtyp_id_text)
-                        )
-                        result = cur.fetchone()
-                        farbe = result[0] if result else None
-                        QgsMessageLog.logMessage(f"DEBUG: Farbe für Rohrnummer {self.gewaehlte_rohrnummer}: {farbe}", "Hauseinfuehrung", Qgis.Info)
-
-                    if self.abzweigung_id is not None:
-                        abzweig_layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr_Abzweigung")[0]
-                        selected_features = [f for f in abzweig_layer.getFeatures() if f["id"] == self.abzweigung_id]
-                        if not selected_features:
-                            self.iface.messageBar().pushMessage("Fehler", "Abzweigung nicht gefunden.", level=Qgis.Critical)
-                            return
-
-                        geom_feature = selected_features[0]
-                        leerrohr_geom = geom_feature.geometry()
-
-                        points = self.erfasste_geom.asPolyline()
-                        if len(points) == 0:
-                            self.iface.messageBar().pushMessage("Fehler", "Erfasste Linie ist leer.", level=Qgis.Critical)
-                            return
-
-                        snapped_point = leerrohr_geom.closestSegmentWithContext(points[0])[1]
-                        points[0] = QgsPointXY(snapped_point)
-                        self.erfasste_geom = QgsGeometry.fromPolylineXY(points)
+                # Neu-Anlage
+                if not self.ui.checkBox_direkt.isChecked():
+                    # Insert via LR/Abzweigung
+                    if hasattr(self, "abzweigung_id") and self.abzweigung_id is not None:
+                        rohrnummer = self.gewaehlte_rohrnummer
                         geom_wkt = self.erfasste_geom.asWkt()
-
                         cur.execute("""
-                            INSERT INTO "lwl"."LWL_Hauseinfuehrung"
+                            INSERT INTO lwl."LWL_Hauseinfuehrung"
                             (geom, "ID_ABZWEIGUNG", "KOMMENTAR", "BESCHREIBUNG", "ROHRNUMMER", "FARBE",
                             "VKG_LR", "HA_ADRCD_SUBCD", "HA_ADRCD", "GEFOERDERT", "id_AUFTRAGGEBER", "VERLEGT_AM", "STATUS", "BEFESTIGT")
                             VALUES (ST_SetSRID(ST_GeomFromText(%s), 31254), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                            """, (
-                            geom_wkt,
-                            self.abzweigung_id,
-                            kommentar,
-                            beschreibung,
-                            rohrnummer,
-                            farbe,
-                            self.gewaehlter_verteiler,
-                            adresspunkt_id,
-                            adrcd,
-                            gefoerdert,
-                            auftraggeber_id,
-                            verlegt_am,
-                            status,
-                            befestigt
+                        """, (
+                            geom_wkt, self.abzweigung_id, kommentar, beschreibung, rohrnummer, farbe,
+                            self.gewaehlter_verteiler, adresspunkt_id, adrcd, gefoerdert,
+                            auftraggeber_id, verlegt_am, status, befestigt
                         ))
-
                     else:
-                        leerrohr_layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr")[0]
-                        selected_features = [f for f in leerrohr_layer.getFeatures() if f["id"] == self.startpunkt_id]
-                        if not selected_features:
-                            self.iface.messageBar().pushMessage("Fehler", "Leerrohr nicht gefunden.", level=Qgis.Critical)
-                            return
-
-                        leerrohr_geom = selected_features[0].geometry()
-                        points = self.erfasste_geom.asPolyline()
-                        if len(points) == 0:
-                            self.iface.messageBar().pushMessage("Fehler", "Erfasste Linie ist leer.", level=Qgis.Critical)
-                            return
-
-                        snapped_point = leerrohr_geom.closestSegmentWithContext(points[0])[1]
-                        points[0] = QgsPointXY(snapped_point)
-                        self.erfasste_geom = QgsGeometry.fromPolylineXY(points)
+                        rohrnummer = self.gewaehlte_rohrnummer
                         geom_wkt = self.erfasste_geom.asWkt()
-
                         cur.execute("""
-                            INSERT INTO "lwl"."LWL_Hauseinfuehrung"
+                            INSERT INTO lwl."LWL_Hauseinfuehrung"
                             (geom, "ID_LEERROHR", "KOMMENTAR", "BESCHREIBUNG", "ROHRNUMMER", "FARBE",
                             "VKG_LR", "HA_ADRCD_SUBCD", "HA_ADRCD", "GEFOERDERT", "id_AUFTRAGGEBER", "VERLEGT_AM", "STATUS", "BEFESTIGT")
                             VALUES (ST_SetSRID(ST_GeomFromText(%s), 31254), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                            """, (
-                            geom_wkt,
-                            self.startpunkt_id,
-                            kommentar,
-                            beschreibung,
-                            rohrnummer,
-                            farbe,
-                            self.gewaehlter_verteiler,
-                            adresspunkt_id,
-                            adrcd,
-                            gefoerdert,
-                            auftraggeber_id,
-                            verlegt_am,
-                            status,
-                            befestigt
+                        """, (
+                            geom_wkt, self.startpunkt_id, kommentar, beschreibung, rohrnummer, farbe,
+                            self.gewaehlter_verteiler, adresspunkt_id, adrcd, gefoerdert,
+                            auftraggeber_id, verlegt_am, status, befestigt
                         ))
 
             conn.commit()
@@ -2207,6 +2073,18 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
                 layer.triggerRepaint()
                 self.iface.mapCanvas().refreshAllLayers()
                 self.iface.mapCanvas().refresh()
+
+            # --- NEU: ROTE LINIE SICHER ENTFERNEN (defensiv, ohne Logikänderung) ---
+            try:
+                if hasattr(self, "result_rb") and self.result_rb:
+                    self.result_rb.reset()
+                if hasattr(self, "rubber_band") and self.rubber_band:
+                    self.rubber_band.reset()
+                if hasattr(self, "map_tool") and hasattr(self.map_tool, "tmp_rb") and self.map_tool.tmp_rb:
+                    self.map_tool.tmp_rb.reset()
+            except Exception:
+                pass
+            # ----------------------------------------------------------------------
 
             if self.mehrfachimport_modus:
                 if hasattr(self, "rubber_band") and self.rubber_band:
@@ -2249,7 +2127,6 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
                     self.iface.messageBar().pushMessage(
                         "Info", "Daten importiert. Bitte erfassen Sie die nächste Hauseinführung.", level=Qgis.Success
                     )
-
             else:
                 self.formular_initialisieren()
 
