@@ -185,6 +185,15 @@ class GuidedStartLineTool(QgsMapTool):
             self.tmp_rb.addPoint(tail_point)
 
     # ---------- Events ----------
+    def _interval_valid(self):
+        if not self.free_interval:
+            return True
+        try:
+            a, b = self.free_interval
+            return float(b) - float(a) > 1e-9
+        except Exception:
+            return True
+
     def canvasMoveEvent(self, e):
         mappt = self._toMap(e.pos())
         if not self.guided_done and self.snap_ref_geom and not self.snap_ref_geom.isEmpty():
@@ -196,13 +205,26 @@ class GuidedStartLineTool(QgsMapTool):
 
             if self.mode == "lr":
                 g = self.parent_lr_geom if (self.parent_lr_geom) else self.snap_ref_geom
-                mappt = self._clamp_on_interval(g, mappt)
-                # Vorschau: nur Startpunkt→Mauspunkt (kein Korridor im LR-Modus)
-                self._draw_preview(mappt)
-                self.marker.setCenter(mappt); self.marker.show()
+                # Kein freier Abschnitt -> nichts zeichnen
+                if not self._interval_valid():
+                    if not self._no_free_interval_warned:
+                        # keine iface hier; still schweigen + Marker aus
+                        self._no_free_interval_warned = True
+                    self.marker.hide()
+                    self.tmp_rb.reset(QgsWkbTypes.LineGeometry)
+                    return
+
+                snap = self._clamp_on_interval(g, mappt)
+                if snap is None:
+                    self.marker.hide()
+                    self.tmp_rb.reset(QgsWkbTypes.LineGeometry)
+                    return
+
+                self._draw_preview(snap)
+                self.marker.setCenter(snap); self.marker.show()
                 return
 
-            # mode == "ha": Vorschau entlang Bestands-HE vom LR-Ende bis Snap
+            # mode == "ha": Vorschau entlang Bestands-HE (unverändert)
             snap_on_he = self._closest_on(self.snap_ref_geom, mappt)
             pts = self._corridor_for_ha(self.snap_ref_geom, snap_on_he, self.parent_lr_geom)
             self.tmp_rb.setToGeometry(QgsGeometry.fromPolylineXY(pts), None)
@@ -217,31 +239,46 @@ class GuidedStartLineTool(QgsMapTool):
     def canvasPressEvent(self, e):
         if e.button() != Qt.LeftButton:
             return
+
         mappt = self._toMap(e.pos())
 
         if not self.guided_done and self.snap_ref_geom and not self.snap_ref_geom.isEmpty():
+            # Punkt-Referenz
             if QgsWkbTypes.geometryType(self.snap_ref_geom.wkbType()) == QgsWkbTypes.PointGeometry:
                 self.points.append(QgsPointXY(self.snap_ref_geom.asPoint()))
+
             else:
                 if self.mode == "lr":
-                    g = self.parent_lr_geom if (self.parent_lr_geom) else self.snap_ref_geom
+                    g = self.parent_lr_geom if self.parent_lr_geom else self.snap_ref_geom
+
+                    # kein freier Abschnitt -> keine Punktübernahme
+                    if not self._interval_valid():
+                        return
+
                     snap_pt = self._clamp_on_interval(g, mappt)
                     if snap_pt is None:
-                        self.canvas.scene().addSimpleText("Kein freier Rohrabschnitt verfügbar.")
                         return
+                    # LR: nur den Schnittpunkt setzen (kein Korridor)
                     self.points.append(QgsPointXY(snap_pt))
+
                 else:
+                    # HA-Modus: Korridor vom LR-Ende der Bestands-HE bis zum Snap übernehmen
                     snap_on_he = self._closest_on(self.snap_ref_geom, mappt)
                     pts = self._corridor_for_ha(self.snap_ref_geom, snap_on_he, self.parent_lr_geom)
-                    self.points.extend(pts if pts else [QgsPointXY(snap_on_he)])
+                    if pts:
+                        self.points.extend(pts)
+                    else:
+                        self.points.append(QgsPointXY(snap_on_he))
 
+            # Führung beenden, Vorschau aktualisieren
             self.guided_done = True
             self.marker.hide()
             self._draw_preview(None)
+            return
 
-        else:
-            self.points.append(QgsPointXY(mappt))
-            self._draw_preview(None)
+        # weitere Punkte frei setzen
+        self.points.append(QgsPointXY(mappt))
+        self._draw_preview(None)
 
     def canvasReleaseEvent(self, e):
         if e.button() == Qt.RightButton:
@@ -405,6 +442,7 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.settings = QSettings("SiegeleCo", "ToolBox")
         self.db_details = None
         self.is_connected = False
+        self._no_free_interval_warned = False
 
         self.scene = QGraphicsScene()
         self.ui.graphicsView_Farben_Rohre.setScene(self.scene)
@@ -673,8 +711,15 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.iface.messageBar().pushMessage("Info", "Klicken: Punkte setzen • Rechtsklick: beenden. Erster Punkt gleitet am Leerrohr.", level=Qgis.Info)
 
     def aktion_abzweig_von_bestehender_ha(self):
-        """Abzweig von bestehender HA: Korridor IMMER vom HA-Start (Hausanschluss) bis zum Snap-Punkt."""
+        """Abzweig von bestehender HA:
+        - Rohr MUSS gewählt sein.
+        - Abzweig nur erlaubt, wenn die Andock-Position am LR im freien Abschnitt liegt.
+        """
         from qgis.core import QgsCoordinateTransform, QgsGeometry, QgsProject
+
+        if not getattr(self, "gewaehlte_rohrnummer", None):
+            self.iface.messageBar().pushMessage("Hinweis", "Bitte zuerst eine Rohrnummer wählen.", level=Qgis.Warning)
+            return
 
         if not hasattr(self, "result_rb") or self.result_rb is None:
             self.result_rb = QgsRubberBand(self.iface.mapCanvas(), QgsWkbTypes.LineGeometry)
@@ -689,9 +734,36 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
 
         def on_pick_ha(feature, layer):
             try:
+                # Geometrie der Bestands-HE in Karten-CRS
                 g = QgsGeometry(feature.geometry())
                 tr = QgsCoordinateTransform(layer.crs(), self.iface.mapCanvas().mapSettings().destinationCrs(), QgsProject.instance())
                 _ = g.transform(tr)
+
+                # zugehöriges LR + freies Intervall ermitteln
+                start_lr_id = feature["ID_LEERROHR"]
+                vkg_id = int(self.gewaehlter_verteiler)
+                intervall = self.ermittle_freies_intervall(start_lr_id, int(self.gewaehlte_rohrnummer), vkg_id)
+                if not intervall:
+                    self.iface.messageBar().pushMessage("Hinweis", "Am Andock-LR ist für diese Rohrnummer kein freier Abschnitt vorhanden.", level=Qgis.Warning)
+                    return
+                self.freies_intervall = intervall
+
+                # LR-Geometrie holen (für die spätere Orientierung + Prüfung)
+                lr_layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr")[0]
+                lr_feat  = next((f for f in lr_layer.getFeatures() if f["id"] == start_lr_id), None)
+                if not lr_feat:
+                    self.iface.messageBar().pushMessage("Fehler", "Parent-Leerrohr der HE nicht gefunden.", level=Qgis.Critical); return
+                g_lr = QgsGeometry(lr_feat.geometry()); tr2 = QgsCoordinateTransform(lr_layer.crs(), self.iface.mapCanvas().mapSettings().destinationCrs(), QgsProject.instance()); _ = g_lr.transform(tr2)
+
+                # nächster Punkt der HE am LR → Fraction bestimmen und gegen Intervall prüfen
+                # (wir nutzen denselben Mechanismus wie im Tool: Projektions-Fraction)
+                tool_probe = GuidedStartLineTool(self.iface.mapCanvas(), g_lr, None, mode="lr", free_interval=self.freies_intervall, parent_lr_geom=g_lr)
+                # nimm den HE-Punkt, der dem LR am nächsten liegt:
+                he_pt = g.closestSegmentWithContext(g_lr.centroid().asPoint())[1]  # grobe Annäherung
+                s_ok = tool_probe._project_fraction(g_lr, he_pt)
+                if not (self.freies_intervall[0] <= s_ok <= self.freies_intervall[1]):
+                    self.iface.messageBar().pushMessage("Hinweis", "Abzweigpunkt liegt nicht im freien LR-Abschnitt der gewählten Rohrnummer.", level=Qgis.Warning)
+                    return
 
                 def on_finish(points):
                     if len(points) < 2:
@@ -701,16 +773,22 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
                     self.iface.messageBar().pushMessage("Info", "HA-Linie ab bestehender HA erfasst.", level=Qgis.Success)
                     self.iface.mapCanvas().unsetMapTool(self.map_tool)
 
-                # HA-Modus → vom Start (Hausanschluss) loslaufen, VKG-Hinweis nicht nötig
-                self.map_tool = GuidedStartLineTool(self.iface.mapCanvas(), g, on_finish, mode="ha", persist_rb=self.result_rb)
+                # HA-Modus mit LR-Hint + Clamp am freien Intervall der Rohrnummer
+                self.map_tool = GuidedStartLineTool(
+                    self.iface.mapCanvas(), g, on_finish,
+                    mode="ha", persist_rb=self.result_rb, parent_lr_geom=g_lr
+                )
+                # zusätzlich: Clamp auch für den 1. Klick am LR (falls sofort Richtung LR geklickt wird)
+                self.map_tool.free_interval = self.freies_intervall
                 self.iface.mapCanvas().setMapTool(self.map_tool)
-                self.iface.messageBar().pushMessage("Info", "Erster Punkt gleitet an der gewählten HA (vom Start). Rechtsklick: beenden.", level=Qgis.Info)
+                self.iface.messageBar().pushMessage("Info", "Abzweig: erster Punkt entlang Bestands-HE; Start nur im freien LR-Abschnitt möglich.", level=Qgis.Info)
+
             except Exception as e:
                 self.iface.messageBar().pushMessage("Fehler", f"Abzweig-Start fehlgeschlagen: {e}", level=Qgis.Critical)
 
         self.click_selector = ClickSelector(self.iface.mapCanvas(), [ha_layer], on_pick_ha, self.iface)
         self.iface.mapCanvas().setMapTool(self.click_selector)
-        self.iface.messageBar().pushMessage("Info", "Bitte eine bestehende HA zum Andocken wählen.", level=Qgis.Info)
+        self.iface.messageBar().pushMessage("Info", "Bitte bestehende HE zum Andocken wählen.", level=Qgis.Info)
 
     def handle_checkbox_direkt(self, state):
         """Aktiviert/Deaktiviert den Button zur Auswahl des Parent-Leerrohrs."""
@@ -848,133 +926,260 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.click_selector = ClickSelector(self.iface.mapCanvas(), layers, on_feature_selected, self.iface)
         self.iface.mapCanvas().setMapTool(self.click_selector)
 
-    def zeichne_rohre(self, subtyp_id, farbschema, firma, is_abzweigung=False):
-        """Zeichnet Rohre – aktiv nur, wenn rohrgenau bis zum gewählten VKG verbunden.
-        Markiert Rohrnummern auch als belegt, wenn die HE downstream im Netz hängt."""
-        # Szene vorbereiten
-        if self.ui.graphicsView_Farben_Rohre.scene():
-            self.ui.graphicsView_Farben_Rohre.scene().clear()
-        else:
-            self.ui.graphicsView_Farben_Rohre.setScene(QGraphicsScene())
-        self.scene = self.ui.graphicsView_Farben_Rohre.scene()
-        self.scene.setSceneRect(0, 0, 491, 200)
-        self.gewaehlte_rohrnummer = None
-        self.ausgewaehltes_rechteck = None
+    def hole_rohrstatus_aus_db(self, start_lr_id: int, vkg_id: int):
+        """
+        Liefert pro Rohrnummer am Start-LR:
+        rnr, enable_to_vkg, occ_same_vkg, occ_mn_any, occ_mx_any, seite, free_len_on_side_any, final_belegt
+        -> genau die Logik aus der geprüften pgAdmin-SQL.
+        """
+        import psycopg2
+        sql = """
+        WITH RECURSIVE
+        params(start_lr, vkg) AS (VALUES (%s::bigint, %s::bigint)),
 
-        # Farben + Rohrnummern
-        rohre, subtyp_char, typ = self.lade_farben_und_rohrnummern(subtyp_id)
-        if not rohre or subtyp_char is None:
-            self.iface.messageBar().pushMessage("Fehler", f"Keine Rohre/Subtyp für {subtyp_id}.", level=Qgis.Critical)
-            return
+        reach_lr(lr_id) AS (
+        SELECT start_lr FROM params
+        UNION
+        SELECT CASE WHEN rel."ID_LEERROHR_1"=r.lr_id THEN rel."ID_LEERROHR_2" ELSE rel."ID_LEERROHR_1" END
+        FROM reach_lr r
+        JOIN lwl."LWL_Leerrohr_Leerrohr_rel" rel
+            ON rel."ID_LEERROHR_1"=r.lr_id OR rel."ID_LEERROHR_2"=r.lr_id
+        ),
+        ziel_lr AS (
+        SELECT lr.id
+        FROM lwl."LWL_Leerrohr" lr
+        WHERE lr.id = ANY(ARRAY(SELECT lr_id FROM reach_lr))
+            AND (SELECT vkg FROM params) = ANY(lr."VKG_LR")
+        ),
 
-        try:
-            conn = psycopg2.connect(**self.db_details)
-            cur = conn.cursor()
+        ends AS (
+        SELECT
+            l."VONKNOTEN" AS vonk,
+            l."NACHKNOTEN" AS nachk,
+            (SELECT vkg FROM params) AS vkg,
+            (SELECT start_lr FROM params) AS start_lr,
+            ((SELECT vkg FROM params) = ANY(l."VKG_LR")) AS start_has_vkg
+        FROM lwl."LWL_Leerrohr" l
+        WHERE l.id = (SELECT start_lr FROM params)
+        ),
+        bfs_side AS (
+        WITH RECURSIVE neighbors AS (
+            SELECT CASE WHEN rel."ID_LEERROHR_1"=(SELECT start_lr FROM ends)
+                        THEN rel."ID_LEERROHR_2" ELSE rel."ID_LEERROHR_1" END AS nb_lr,
+                rel."ID_KNOTEN" AS via_knoten
+            FROM lwl."LWL_Leerrohr_Leerrohr_rel" rel
+            WHERE rel."ID_LEERROHR_1"=(SELECT start_lr FROM ends)
+            OR rel."ID_LEERROHR_2"=(SELECT start_lr FROM ends)
+        ),
+        walk(lr_id, via_knoten, prev_lr_id, depth) AS (
+            SELECT n.nb_lr, n.via_knoten, (SELECT start_lr FROM ends), 1 FROM neighbors n
+            UNION ALL
+            SELECT CASE WHEN rel."ID_LEERROHR_1"=w.lr_id THEN rel."ID_LEERROHR_2" ELSE rel."ID_LEERROHR_1" END,
+                w.via_knoten, w.lr_id, w.depth+1
+            FROM walk w
+            JOIN lwl."LWL_Leerrohr_Leerrohr_rel" rel
+            ON rel."ID_LEERROHR_1"=w.lr_id OR rel."ID_LEERROHR_2"=w.lr_id
+            WHERE rel."ID_LEERROHR_1"<>w.prev_lr_id AND rel."ID_LEERROHR_2"<>w.prev_lr_id
+        )
+        SELECT w.via_knoten
+        FROM walk w
+        JOIN lwl."LWL_Leerrohr" lr ON lr.id = w.lr_id
+        WHERE (SELECT vkg FROM ends) = ANY(lr."VKG_LR")
+        ORDER BY depth
+        LIMIT 1
+        ),
+        side AS (
+        SELECT
+            CASE
+            WHEN (SELECT start_has_vkg FROM ends) AND (SELECT vkg FROM ends) = (SELECT vonk  FROM ends) THEN 0
+            WHEN (SELECT start_has_vkg FROM ends) AND (SELECT vkg FROM ends) = (SELECT nachk FROM ends) THEN 1
+            ELSE CASE
+                    WHEN (SELECT via_knoten FROM bfs_side) = (SELECT vonk  FROM ends) THEN 0
+                    WHEN (SELECT via_knoten FROM bfs_side) = (SELECT nachk FROM ends) THEN 1
+                    ELSE NULL
+                END
+            END AS seite
+        ),
 
-            # Start-LR (bei Abzweigung: Parent)
-            if is_abzweigung:
-                cur.execute('SELECT "PARENT_LEERROHR_ID" FROM lwl."LWL_Leerrohr_Abzweigung" WHERE "id" = %s', (self.abzweigung_id,))
-                row = cur.fetchone()
-                start_lr_id = row[0] if row and row[0] is not None else None
-            else:
-                start_lr_id = self.startpunkt_id
-
-            if not start_lr_id or not getattr(self, "gewaehlter_verteiler", None):
-                conn.close()
-                self.iface.messageBar().pushMessage("Fehler", "Start-Leerrohr oder VKG fehlt.", level=Qgis.Critical)
-                return
-            vkg_id = int(self.gewaehlter_verteiler)
-
-            # ---------- A) LR-Reichweite ----------
-            cur.execute("""
-                WITH RECURSIVE reach_lr(lr_id) AS (
-                    SELECT %s::bigint
-                    UNION
-                    SELECT CASE WHEN r."ID_LEERROHR_1" = reach_lr.lr_id THEN r."ID_LEERROHR_2"
-                                ELSE r."ID_LEERROHR_1" END
-                    FROM reach_lr
-                    JOIN lwl."LWL_Leerrohr_Leerrohr_rel" r
-                    ON r."ID_LEERROHR_1" = reach_lr.lr_id OR r."ID_LEERROHR_2" = reach_lr.lr_id
-                )
-                SELECT array_agg(DISTINCT lr_id) FROM reach_lr;
-            """, (start_lr_id,))
-            reach_lr_ids = cur.fetchone()[0] or []
-
-            cur.execute("""
-                SELECT lr.id
-                FROM lwl."LWL_Leerrohr" lr
-                WHERE lr.id = ANY(%s::bigint[]) AND %s = ANY(lr."VKG_LR")
-            """, (reach_lr_ids, vkg_id))
-            ziel_lr_ids = [r[0] for r in cur.fetchall()]
-
-            cur.execute('SELECT %s = ANY("VKG_LR") FROM lwl."LWL_Leerrohr" WHERE id=%s', (vkg_id, start_lr_id))
-            start_has_vkg = cur.fetchone()[0] if cur.rowcount else False
-
-            if not ziel_lr_ids and not start_has_vkg:
-                self.belegte_rohre = []
-                self._render_rohr_quadrate(rohre, subtyp_char, typ, enable_set=set(), info_hint="Keine LR-Verbindung zum VKG")
-                conn.close()
-                return
-
-            ziel_lr_all = list(set(ziel_lr_ids + ([start_lr_id] if start_has_vkg else [])))
-
-            # ---------- B) Erreichbare Rohrnummern (Rohrketten bis Ziel-LR) ----------
-            cur.execute("""
-            WITH RECURSIVE
-            start_rohre AS (
-            SELECT r.id AS rid, r."ROHRNUMMER" AS rnr
+        segments_all AS (
+        SELECT "ROHRNUMMER" AS rnr,
+                COALESCE(MIN("FROM_POS"),1.0)::float AS mn_all,
+                COALESCE(MAX("TO_POS"),  0.0)::float AS mx_all
+        FROM lwl."LWL_Rohr"
+        WHERE "ID_LEERROHR" = (SELECT start_lr FROM params)
+        GROUP BY "ROHRNUMMER"
+        ),
+        enable_rnr AS (
+        WITH RECURSIVE start_rohre(rid, rnr) AS (
+            SELECT r.id, r."ROHRNUMMER"
             FROM lwl."LWL_Rohr" r
-            WHERE r."ID_LEERROHR" = %s
-            ),
-            walk(rid, rnr) AS (
+            WHERE r."ID_LEERROHR" = (SELECT start_lr FROM params)
+        ),
+        walk(rid, rnr) AS (
             SELECT rid, rnr FROM start_rohre
             UNION
-            SELECT CASE WHEN rel."ID_ROHR_1" = w.rid THEN rel."ID_ROHR_2" ELSE rel."ID_ROHR_1" END, w.rnr
+            SELECT CASE WHEN rel."ID_ROHR_1"=w.rid THEN rel."ID_ROHR_2" ELSE rel."ID_ROHR_1" END, w.rnr
             FROM walk w
             JOIN lwl."LWL_Rohr_Rohr_rel" rel
-                ON rel."ID_ROHR_1" = w.rid OR rel."ID_ROHR_2" = w.rid
+            ON rel."ID_ROHR_1"=w.rid OR rel."ID_ROHR_2"=w.rid
+        )
+        SELECT DISTINCT w.rnr
+        FROM walk w
+        JOIN lwl."LWL_Rohr" r2 ON r2.id = w.rid
+        WHERE r2."ID_LEERROHR" = ANY(ARRAY(SELECT id FROM ziel_lr))
+        ),
+        targets_same AS (
+        SELECT DISTINCT r2.id AS rid, r2."ROHRNUMMER" AS rnr
+        FROM lwl."LWL_Rohr" r2
+        JOIN lwl."LWL_Hauseinfuehrung" ha
+            ON ha."ID_LEERROHR"=r2."ID_LEERROHR" AND ha."ROHRNUMMER"=r2."ROHRNUMMER"
+        WHERE ha."VKG_LR" = (SELECT vkg FROM params)
+            AND r2."ID_LEERROHR" = ANY(ARRAY(SELECT lr_id FROM reach_lr))
+        ),
+        walk_back_same(rid, rnr) AS (
+        SELECT rid, rnr FROM targets_same
+        UNION
+        SELECT CASE WHEN rel."ID_ROHR_1"=w.rid THEN rel."ID_ROHR_2" ELSE rel."ID_ROHR_1" END, w.rnr
+        FROM walk_back_same w
+        JOIN lwl."LWL_Rohr_Rohr_rel" rel
+            ON rel."ID_ROHR_1"=w.rid OR rel."ID_ROHR_2"=w.rid
+        ),
+        occ_same_set AS ( SELECT DISTINCT rnr FROM walk_back_same ),
+
+        he_pos_on_start AS (
+        SELECT
+            ha."ROHRNUMMER" AS rnr,
+            ST_LineLocatePoint(
+            ST_LineMerge(ST_CollectionExtract(ST_Force2D(l.geom), 2)),
+            ST_Force2D(kn.geom)
+            )::float AS pos
+        FROM lwl."LWL_Hauseinfuehrung" ha
+        JOIN lwl."LWL_Leerrohr" l ON l.id = ha."ID_LEERROHR"
+        JOIN lwl."LWL_Knoten"  kn ON kn.id = ha."ID_KNOTEN"
+        WHERE ha."ID_LEERROHR" = (SELECT start_lr FROM params)
+        ),
+        occ_on_start_any AS (
+        SELECT rnr,
+                MIN(pos)::float AS occ_mn_any,
+                MAX(pos)::float AS occ_mx_any
+        FROM he_pos_on_start
+        GROUP BY rnr
+        )
+
+        SELECT
+        sa.rnr,
+        (sa.rnr = ANY(ARRAY(SELECT rnr FROM enable_rnr)))    AS enable_to_vkg,
+        (sa.rnr = ANY(ARRAY(SELECT rnr FROM occ_same_set)))  AS occ_same_vkg,
+        COALESCE(os.occ_mn_any, 1.0) AS occ_mn_any,
+        COALESCE(os.occ_mx_any, 0.0) AS occ_mx_any,
+        (SELECT seite FROM side)      AS seite,
+        CASE (SELECT seite FROM side)
+            WHEN 0 THEN GREATEST(COALESCE(os.occ_mn_any,1.0) - 0.0, 0.0)
+            WHEN 1 THEN GREATEST(1.0 - COALESCE(os.occ_mx_any,0.0), 0.0)
+            ELSE GREATEST(sa.mn_all - 0.0, 1.0 - sa.mx_all)
+        END AS free_len_on_side_any,
+        (
+            (sa.rnr = ANY(ARRAY(SELECT rnr FROM occ_same_set)))
+            OR
+            (
+            CASE (SELECT seite FROM side)
+                WHEN 0 THEN (COALESCE(os.occ_mn_any,1.0) - 0.0) <= 1e-9
+                WHEN 1 THEN (1.0 - COALESCE(os.occ_mx_any,0.0)) <= 1e-9
+                ELSE (GREATEST(sa.mn_all - 0.0, 1.0 - sa.mx_all) <= 1e-9)
+            END
             )
-            SELECT DISTINCT w.rnr
-            FROM walk w
-            JOIN lwl."LWL_Rohr" r2 ON r2.id = w.rid
-            WHERE r2."ID_LEERROHR" = ANY(%s::bigint[])
-            """, (start_lr_id, ziel_lr_all))
-            rohrnummern_mit_vkgpfad = set(n for (n,) in cur.fetchall())
+        ) AS final_belegt
+        FROM segments_all sa
+        LEFT JOIN occ_on_start_any os ON os.rnr = sa.rnr
+        ORDER BY sa.rnr;
+        """
+        rows = []
+        import psycopg2.extras
+        with psycopg2.connect(**self.db_details) as conn, conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+            cur.execute(sql, (start_lr_id, vkg_id))
+            rows = cur.fetchall()
 
-            # ---------- C) Netzweite Belegung (unabhängig von r2.ID_HAUSEINFÜHRUNG) ----------
-            # Belegt, wenn eine HE mit diesem VKG auf IRGENDeinem erreichbaren LR dieselbe Rohrnummer hat.
-            cur.execute("""
-                SELECT DISTINCT ha."ROHRNUMMER"
-                FROM lwl."LWL_Hauseinfuehrung" ha
-                WHERE ha."VKG_LR" = %s
-                AND ha."ID_LEERROHR" = ANY(%s::bigint[])
-            """, (vkg_id, reach_lr_ids))
-            belegte_rnr_im_netz = {n for (n,) in cur.fetchall()}
+        status = {}
+        seite_val = None
+        for r in rows:
+            rnr = int(r["rnr"])
+            status[rnr] = {
+                "enable": bool(r["enable_to_vkg"]),
+                "occ_same_vkg": bool(r["occ_same_vkg"]),
+                "occ_mn_any": float(r["occ_mn_any"]),
+                "occ_mx_any": float(r["occ_mx_any"]),
+                "free_len_on_side_any": float(r["free_len_on_side_any"]),
+                "final_belegt": bool(r["final_belegt"]),
+            }
+            seite_val = int(r["seite"]) if r["seite"] is not None else None
 
-            # lokale Belegung (optional zusätzlich)
-            if is_abzweigung:
-                cur.execute("""SELECT DISTINCT "ROHRNUMMER"
-                            FROM lwl."LWL_Hauseinfuehrung"
-                            WHERE "ID_ABZWEIGUNG"=%s AND "VKG_LR"=%s""", (self.abzweigung_id, vkg_id))
+        return status, seite_val
+
+    def zeichne_rohre(self, subtyp_id, farbschema, firma, is_abzweigung=False):
+        """Zeichnet die Palette gemäß DB-Ergebnis (identisch zu pgAdmin-SQL)."""
+        # Szene vorbereiten
+        try:
+            if self.ui.graphicsView_Farben_Rohre.scene():
+                self.ui.graphicsView_Farben_Rohre.scene().clear()
             else:
-                cur.execute("""SELECT DISTINCT "ROHRNUMMER"
-                            FROM lwl."LWL_Hauseinfuehrung"
-                            WHERE "ID_LEERROHR"=%s AND "VKG_LR"=%s""", (start_lr_id, vkg_id))
-            belegte_local = {n for (n,) in cur.fetchall()}
+                from PyQt5.QtWidgets import QGraphicsScene
+                self.ui.graphicsView_Farben_Rohre.setScene(QGraphicsScene())
+            self.scene = self.ui.graphicsView_Farben_Rohre.scene()
+            self.scene.setSceneRect(0, 0, 491, 200)
+            self.gewaehlte_rohrnummer = None
+            self.ausgewaehltes_rechteck = None
+            self._msg("info", "Prüfe Rohrbelegung …", append=False)
+        except Exception:
+            pass
 
-            self.belegte_rohre = sorted(belegte_rnr_im_netz.union(belegte_local))
-            conn.close()
-
-        except Exception as e:
-            self.iface.messageBar().pushMessage("Fehler", f"zeichne_rohre fehlgeschlagen: {e}", level=Qgis.Critical)
+        # Rohr-/Farbliste laden (deine bestehende Methode)
+        rohre, subtyp_char, typ = self.lade_farben_und_rohrnummern(subtyp_id)
+        if not rohre:
+            self._msg("error", "Keine Rohre/Subtyp gefunden.")
             return
 
-        # Rendering
-        self._render_rohr_quadrate(
-            rohre, subtyp_char, typ,
-            enable_set=rohrnummern_mit_vkgpfad,
-            info_hint=None
-        )
+        # Start-LR bestimmen
+        start_lr_id = None
+        try:
+            if is_abzweigung:
+                import psycopg2
+                with psycopg2.connect(**self.db_details) as conn, conn.cursor() as cur:
+                    cur.execute('SELECT "PARENT_LEERROHR_ID" FROM lwl."LWL_Leerrohr_Abzweigung" WHERE id=%s', (self.abzweigung_id,))
+                    r = cur.fetchone()
+                    start_lr_id = int(r[0]) if r and r[0] is not None else None
+            else:
+                start_lr_id = int(self.startpunkt_id)
+        except Exception:
+            pass
+
+        if not start_lr_id or not getattr(self, "gewaehlter_verteiler", None):
+            self._msg("error", "Start-Leerrohr oder VKG fehlt.")
+            return
+        vkg_id = int(self.gewaehlter_verteiler)
+
+        # **Hier**: Status aus DB holen (identisch zu pgAdmin)
+        try:
+            status, seite = self.hole_rohrstatus_aus_db(start_lr_id, vkg_id)
+            # Merken für Snappoint-Berechnung
+            self._rohrstatus_cache = {"seite": seite, "map": status, "start_lr": start_lr_id, "vkg": vkg_id}
+
+            enable_set = {rnr for rnr, s in status.items() if s["enable"]}
+            self.belegte_rohre = sorted([rnr for rnr, s in status.items() if s["final_belegt"]])
+
+            # Zeichnen (dein Renderer mit Overlays)
+            self._render_rohr_quadrate(rohre, subtyp_char, typ, enable_set=enable_set)
+
+            frei = sorted(set(status.keys()) - set(self.belegte_rohre))
+            self._msg("ok", f"VKG {vkg_id}: {len(frei)} frei, {len(self.belegte_rohre)} belegt. Seite: "
+                            f"{'VON' if seite==0 else ('NACH' if seite==1 else 'unbekannt')}.")
+
+            # Debug exakt wie in pgAdmin
+            self._msg("info", f"DBG enable_set={sorted(list(enable_set))}")
+            self._msg("info", f"DBG belegte_rohre={sorted(list(self.belegte_rohre))}")
+
+        except Exception as e:
+            self._msg("error", f"zeichne_rohre fehlgeschlagen: {e}")
+            return
 
     def _render_rohr_quadrate(self, rohre, subtyp_char, typ, enable_set, info_hint=None):
         """Nur intern: zeichnet die Kästchen mit deiner bestehenden Optik (grau/X für nicht wählbar)."""
@@ -1051,8 +1256,216 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.ui.graphicsView_Farben_Rohre.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.iface.messageBar().pushMessage("Info", "Rohre (rohrgenau) angezeigt.", level=Qgis.Success)
 
+    def _msg(self, level: str, text: str, append: bool = True):
+        """
+        level: 'info' | 'warn' | 'error' | 'ok'
+        schreibt Meldungen ins label_Pruefung (statt MessageBar)
+        """
+        try:
+            import html as _html
+            lbl = getattr(self.ui, "label_Pruefung", None)
+            if lbl is None:
+                # Fallback, falls das Label im Dialog unerwartet fehlt
+                try:
+                    from qgis.core import Qgis
+                    self.iface.messageBar().pushMessage("Hinweis", text, level={
+                        "info": Qgis.Info, "warn": Qgis.Warning, "error": Qgis.Critical, "ok": Qgis.Success
+                    }.get(level, Qgis.Info))
+                except Exception:
+                    pass
+                return
+            color = {"info": "#1f6feb", "warn": "#d29922", "error": "#f85149", "ok": "#238636"}.get(level, "#1f6feb")
+            prefix = {"info": "Hinweis", "warn": "Warnung", "error": "Fehler", "ok": "OK"}.get(level, "Hinweis")
+            snippet = f'<span style="color:{color};font-weight:600">{prefix}:</span> {_html.escape(str(text))}'
+            if append and lbl.text():
+                lbl.setText(lbl.text() + "<br/>" + snippet)
+            else:
+                lbl.setText(snippet)
+        except Exception:
+            # ganz still bleiben, Label-Ausgaben sollen nie crashen
+            pass
+
+    def pruefe_rohrwahl_vor_digitisieren(self, quelle: str = "") -> bool:
+        """
+        Prüft, ob eine Rohrnummer gewählt wurde.
+        Wenn nicht: Hinweis ins label_Pruefung + akustisches Signal.
+        Rückgabe: True = OK (Rohr gewählt), False = abbrechen.
+        """
+        try:
+            rnr = getattr(self, "gewaehlte_rohrnummer", None)
+            if rnr in (None, "", 0):
+                self._msg("warn", "Bitte zuerst ein Rohr wählen (Kästchen anklicken), "
+                                "danach erst die HE digitalisieren.")
+                try:
+                    from PyQt5.QtWidgets import QApplication
+                    QApplication.beep()
+                except Exception:
+                    pass
+                return False
+            return True
+        except Exception as e:
+            # Sicher ist sicher – im Zweifel lieber blocken, damit nichts „blind“ digitalisiert wird
+            self._msg("error", f"Prüfung Rohrwahl fehlgeschlagen: {e}")
+            return False
+
+    def init_vorschau_nach_import(self, geom_obj):
+        """
+        Initialisiert/aktualisiert die rote Vorschau-Linie nach erfolgreichem Import.
+        'geom_obj' darf sein:
+        - QgsGeometry  (LineString/MultiLineString)
+        - WKB-Bytes    (geom.asWkb())
+        - WKT-String   (geom.asWkt())
+        - Liste von Punkten [(x,y), ...] oder [QgsPointXY, ...]
+        Ändert KEINE Kästchen-Farben. Nur eine rote Linie auf dem Canvas.
+        """
+        from PyQt5.QtCore import Qt
+        from PyQt5.QtGui import QColor
+        from qgis.core import QgsGeometry, QgsPointXY, QgsWkbTypes
+        from qgis.gui import QgsRubberBand
+
+        try:
+            canvas = self.iface.mapCanvas()
+
+            # RubberBand anlegen (einmalig)
+            rb = getattr(self, "_rb_preview", None)
+            if rb is None:
+                rb = QgsRubberBand(canvas, QgsWkbTypes.LineGeometry)
+                rb.setColor(QColor(220, 0, 0))
+                rb.setWidth(2)
+                rb.setLineStyle(Qt.SolidLine)
+                self._rb_preview = rb
+
+            # Geometrie nach QgsGeometry wandeln
+            geom = None
+            if hasattr(geom_obj, "asWkb") or hasattr(geom_obj, "asWkt"):
+                # ist schon eine QgsGeometry
+                geom = geom_obj if isinstance(geom_obj, QgsGeometry) else QgsGeometry(geom_obj)
+                if not isinstance(geom_obj, QgsGeometry):
+                    # Fallback, falls Konstruktor nicht greift
+                    try:
+                        geom = QgsGeometry.fromWkb(geom_obj.asWkb())
+                    except Exception:
+                        geom = QgsGeometry.fromWkt(geom_obj.asWkt())
+            elif isinstance(geom_obj, (bytes, bytearray)):
+                geom = QgsGeometry.fromWkb(geom_obj)
+            elif isinstance(geom_obj, str):
+                geom = QgsGeometry.fromWkt(geom_obj)
+            elif isinstance(geom_obj, (list, tuple)) and geom_obj:
+                # Liste von Koordinaten → Polyline
+                pts = []
+                for p in geom_obj:
+                    if hasattr(p, "x") and hasattr(p, "y"):
+                        pts.append(QgsPointXY(p.x(), p.y()))
+                    else:
+                        x, y = p
+                        pts.append(QgsPointXY(float(x), float(y)))
+                geom = QgsGeometry.fromPolylineXY(pts)
+
+            if geom is None or geom.isEmpty():
+                self._msg("warn", "Vorschau-Linie konnte nicht initialisiert werden (keine Geometrie).")
+                return
+
+            # setzen & zeigen
+            rb.reset(QgsWkbTypes.LineGeometry)
+            rb.setToGeometry(geom, None)
+            rb.show()
+            self._msg("ok", "Rote Vorschau-Linie initialisiert.")
+
+        except Exception as e:
+            self._msg("error", f"Vorschau initialisieren fehlgeschlagen: {e}")
+
+
+    def ermittle_freies_intervall(self, start_lr_id: int, rohrnummer: int, vkg_id: int):
+        """
+        Freies Außenintervall am Start-LR für die gewählte Rohrnummer – auf der zum VKG zeigenden Seite.
+        Nutzt den Cache aus hole_rohrstatus_aus_db(); fällt bei Bedarf auf DB zurück.
+        """
+        EPS = 1e-9
+
+        # Cache verwenden, wenn passend
+        st = getattr(self, "_rohrstatus_cache", None)
+        if st and st.get("start_lr") == start_lr_id and st.get("vkg") == vkg_id:
+            seite = st.get("seite")
+            s = (st.get("map") or {}).get(int(rohrnummer))
+            if s:
+                occ_mn, occ_mx = float(s["occ_mn_any"]), float(s["occ_mx_any"])
+                if seite == 0:
+                    a, b = 0.0, max(0.0, min(1.0, occ_mn))
+                elif seite == 1:
+                    a, b = max(0.0, min(1.0, occ_mx)), 1.0
+                else:
+                    # Fallback: komplette Außenkanten aus Rohrgeometrie
+                    a, b = 0.0, 1.0
+                return None if (b - a) <= EPS else (a, b)
+
+        # Fallback: kleiner DB-Call nur für diese Rohrnummer (identische Logik der Außenkante)
+        try:
+            import psycopg2
+            with psycopg2.connect(**self.db_details) as conn, conn.cursor() as cur:
+                # Seite bestimmen
+                cur.execute('SELECT "VONKNOTEN","NACHKNOTEN","VKG_LR" FROM lwl."LWL_Leerrohr" WHERE id=%s', (start_lr_id,))
+                vonk, nachk, vkg_arr = cur.fetchone()
+                if vkg_id in (vkg_arr or []):
+                    seite = 0 if vkg_id == vonk else 1 if vkg_id == nachk else None
+                else:
+                    cur.execute("""
+                    WITH RECURSIVE neighbors AS (
+                    SELECT CASE WHEN rel."ID_LEERROHR_1"=%s THEN rel."ID_LEERROHR_2" ELSE rel."ID_LEERROHR_1" END AS nb_lr,
+                            rel."ID_KNOTEN" AS via_knoten
+                    FROM lwl."LWL_Leerrohr_Leerrohr_rel" rel
+                    WHERE rel."ID_LEERROHR_1"=%s OR rel."ID_LEERROHR_2"=%s
+                    ),
+                    walk(lr_id, via_knoten, prev_lr_id, depth) AS (
+                    SELECT n.nb_lr, n.via_knoten, %s::bigint, 1 FROM neighbors n
+                    UNION ALL
+                    SELECT CASE WHEN rel."ID_LEERROHR_1"=w.lr_id THEN rel."ID_LEERROHR_2" ELSE rel."ID_LEERROHR_1" END,
+                            w.via_knoten, w.lr_id, w.depth+1
+                    FROM walk w
+                    JOIN lwl."LWL_Leerrohr_Leerrohr_rel" rel
+                        ON rel."ID_LEERROHR_1"=w.lr_id OR rel."ID_LEERROHR_2"=w.lr_id
+                    WHERE rel."ID_LEERROHR_1"<>w.prev_lr_id AND rel."ID_LEERROHR_2"<>w.prev_lr_id
+                    )
+                    SELECT w.via_knoten
+                    FROM walk w
+                    JOIN lwl."LWL_Leerrohr" lr ON lr.id = w.lr_id
+                    WHERE %s = ANY(lr."VKG_LR")
+                    ORDER BY depth LIMIT 1
+                    """, (start_lr_id, start_lr_id, start_lr_id, start_lr_id, vkg_id))
+                    r = cur.fetchone()
+                    via = r[0] if r else None
+                    seite = 0 if via == vonk else 1 if via == nachk else None
+
+                # Außenkanten aus HEs am Start-LR (nur diese Rohrnummer)
+                cur.execute("""
+                    WITH he_pos AS (
+                    SELECT
+                        ST_LineLocatePoint(
+                        ST_LineMerge(ST_CollectionExtract(ST_Force2D(l.geom), 2)),
+                        ST_Force2D(kn.geom)
+                        )::float AS pos
+                    FROM lwl."LWL_Hauseinfuehrung" ha
+                    JOIN lwl."LWL_Leerrohr" l ON l.id = ha."ID_LEERROHR"
+                    JOIN lwl."LWL_Knoten"  kn ON kn.id = ha."ID_KNOTEN"
+                    WHERE ha."ID_LEERROHR"=%s AND ha."ROHRNUMMER"=%s
+                    )
+                    SELECT COALESCE(MIN(pos),1.0)::float, COALESCE(MAX(pos),0.0)::float
+                """, (start_lr_id, int(rohrnummer)))
+                occ_mn, occ_mx = cur.fetchone()
+
+            if seite == 0:
+                a, b = 0.0, max(0.0, min(1.0, occ_mn))
+            elif seite == 1:
+                a, b = max(0.0, min(1.0, occ_mx)), 1.0
+            else:
+                a, b = 0.0, 1.0
+            return None if (b - a) <= EPS else (a, b)
+
+        except Exception as e:
+            self._msg("error", f"Intervallermittlung fehlgeschlagen: {e}")
+            return None
+
     def handle_rect_click(self, rohrnummer, farb_id):
-        # Auswahl-Markierung wie gehabt …
+        # alte Auswahl zurücksetzen
         if self.ausgewaehltes_rechteck:
             try:
                 ist_belegt = self.ausgewaehltes_rechteck.rohrnummer in getattr(self, "belegte_rohre", [])
@@ -1069,49 +1482,29 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.gewaehlte_rohrnummer = int(rohrnummer)
         self.gewaehlte_farb_id = farb_id
 
-        # Freies Intervall nur am Start-LR notwendig (Clamping)
-        self.freies_intervall = (0.0, 1.0)
+        # freies Intervall am Start-LR berechnen (nur dort wird geklickt)
         try:
             vkg_id = int(self.gewaehlter_verteiler)
-            conn = psycopg2.connect(**self.db_details); cur = conn.cursor()
             # Start-LR (bei Abzweig: Parent)
             if getattr(self, "abzweigung_id", None):
-                cur.execute('SELECT "PARENT_LEERROHR_ID" FROM lwl."LWL_Leerrohr_Abzweigung" WHERE "id" = %s', (self.abzweigung_id,))
+                conn = psycopg2.connect(**self.db_details); cur = conn.cursor()
+                cur.execute('SELECT "PARENT_LEERROHR_ID" FROM lwl."LWL_Leerrohr_Abzweigung" WHERE "id"=%s', (self.abzweigung_id,))
                 row = cur.fetchone(); start_lr_id = row[0] if row else None
+                conn.close()
             else:
                 start_lr_id = self.startpunkt_id
-            if not start_lr_id:
-                conn.close(); return
 
-            # vorhandene Segmente dieser Rohrnummer am Start-LR
-            cur.execute("""
-                SELECT "FROM_POS","TO_POS"
-                FROM lwl."LWL_Rohr"
-                WHERE "ID_LEERROHR"=%s AND "ROHRNUMMER"=%s
-                ORDER BY "FROM_POS"
-            """, (start_lr_id, self.gewaehlte_rohrnummer))
-            segs = [(float(a), float(b)) for a,b in cur.fetchall()]
-
-            # VKG-Seite heuristisch: welcher Endknoten des Start-LR ist der VKG?
-            cur.execute('SELECT "VONKNOTEN","NACHKNOTEN" FROM lwl."LWL_Leerrohr" WHERE id=%s', (start_lr_id,))
-            vonk, nachk = cur.fetchone() if cur.rowcount else (None, None)
-            vkg_seite = 1.0 if (nachk == vkg_id) else 0.0
-
-            if segs:
-                froms = [a for a,_ in segs]; tos = [b for _,b in segs]
-                if vkg_seite == 0.0:
-                    a = 0.0; b = min(froms)
-                else:
-                    a = max(tos); b = 1.0
-                self.freies_intervall = (max(0.0, min(1.0, a)), max(0.0, min(1.0, b)))
+            intervall = self.ermittle_freies_intervall(start_lr_id, self.gewaehlte_rohrnummer, vkg_id)
+            if not intervall:
+                self.freies_intervall = (0.0, 0.0)
+                self.iface.messageBar().pushMessage("Hinweis", f"Rohr {self.gewaehlte_rohrnummer}: am Start-LR kein freier Abschnitt mehr.", level=Qgis.Warning)
             else:
-                self.freies_intervall = (0.0, 1.0)
+                self.freies_intervall = intervall
+                self.iface.messageBar().pushMessage("Info", f"Freier Start-Abschnitt für Rohr {self.gewaehlte_rohrnummer}: {self.freies_intervall}", level=Qgis.Info)
 
-            conn.close()
-            self.iface.messageBar().pushMessage("Info", f"Freies Intervall: {self.freies_intervall}", level=Qgis.Info)
         except Exception as e:
-            self.iface.messageBar().pushMessage("Fehler", f"Intervallermittlung fehlgeschlagen: {e}", level=Qgis.Critical)
             self.freies_intervall = (0.0, 1.0)
+            self.iface.messageBar().pushMessage("Fehler", f"Intervallermittlung fehlgeschlagen: {e}", level=Qgis.Critical)
 
     def clear_ha_preview(self):
         """Alle temporären Zeichenobjekte/Tools bereinigen."""
@@ -1191,10 +1584,22 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
             return [], None, None
 
     def aktion_verlauf(self):
-        """Standard: erster Punkt gleitet sichtbar (LR oder VKG); Korridor wird übernommen."""
+        """Digitalisieren ab gewähltem LR/Abzweig:
+        - Rohr MUSS vorab gewählt sein (sonst Abbruch).
+        - 1. Punkt wird auf freien LR-Abschnitt (self.freies_intervall) geclamped.
+        """
         from qgis.core import QgsCoordinateTransform, QgsProject, QgsGeometry
 
-        # persistenter Ergebnis-RubberBand
+        # Direktmodus erlaubt Rohr=0 – sonst Rohrpflicht
+        if not self.ui.checkBox_direkt.isChecked():
+            if not getattr(self, "gewaehlte_rohrnummer", None):
+                self.iface.messageBar().pushMessage("Hinweis", "Bitte zuerst eine Rohrnummer wählen.", level=Qgis.Warning)
+                return
+            if not hasattr(self, "freies_intervall"):
+                self.iface.messageBar().pushMessage("Hinweis", "Rohr gewählt – freier Abschnitt wird ermittelt. Bitte erneut starten.", level=Qgis.Info)
+                return
+
+        # persistenter RB
         if not hasattr(self, "result_rb") or self.result_rb is None:
             self.result_rb = QgsRubberBand(self.iface.mapCanvas(), QgsWkbTypes.LineGeometry)
             self.result_rb.setColor(Qt.red); self.result_rb.setWidth(2)
@@ -1206,7 +1611,6 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         vkg_hint = getattr(self, "gewaehlter_verteiler", None)
 
         if self.ui.checkBox_direkt.isChecked():
-            # Direkt: Punkt am VKG
             kn_layer = QgsProject.instance().mapLayersByName("LWL_Knoten")[0]
             vk = next((f for f in kn_layer.getFeatures() if f["id"] == vkg_hint), None)
             if not vk:
@@ -1214,9 +1618,9 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
             ref_geom = QgsGeometry(vk.geometry())
             tr = QgsCoordinateTransform(kn_layer.crs(), self.iface.mapCanvas().mapSettings().destinationCrs(), QgsProject.instance())
             _ = ref_geom.transform(tr)
-            ref_mode = "ha"  # Punkt → egal, wir übernehmen einfach den Punkt
+            ref_mode = "ha"  # Punkt
         else:
-            # Leerrohr oder Abzweigung wählen
+            # Parent-Geom holen
             layer = None; feat = None
             if getattr(self, "abzweigung_id", None):
                 layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr_Abzweigung")[0]
@@ -1243,11 +1647,16 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
             ref_geom,
             on_finish,
             mode=ref_mode,
-            vkg_hint_id=vkg_hint,            # wichtig: LR vom VKG-Ende starten
+            vkg_hint_id=vkg_hint,
             persist_rb=self.result_rb
         )
+        # ganz wichtig: freien Startbereich durchreichen
+        if ref_mode == "lr":
+            self.map_tool.free_interval = getattr(self, "freies_intervall", (0.0,1.0))
+            self.map_tool.parent_lr_geom = ref_geom
+
         self.iface.mapCanvas().setMapTool(self.map_tool)
-        self.iface.messageBar().pushMessage("Info", "Klicken: Punkte setzen • Rechtsklick: beenden. Korridor wird übernommen.", level=Qgis.Info)
+        self.iface.messageBar().pushMessage("Info", "Klicken: Punkte setzen • Rechtsklick: beenden. Startpunkt nur im freien LR-Abschnitt.", level=Qgis.Info)
 
     def aufschliessungspunkt_verwalten(self, state):
         """Aktiviert/Deaktiviert den Adressauswahlbutton basierend auf der Checkbox."""
