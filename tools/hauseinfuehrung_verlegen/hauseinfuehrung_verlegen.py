@@ -717,19 +717,24 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         """
         from qgis.core import QgsCoordinateTransform, QgsGeometry, QgsProject
 
+        # Rohrpflicht
         if not getattr(self, "gewaehlte_rohrnummer", None):
-            self.iface.messageBar().pushMessage("Hinweis", "Bitte zuerst eine Rohrnummer wählen.", level=Qgis.Warning)
+            self._msg("warn", "Bitte zuerst eine Rohrnummer wählen.")
             return
 
+        # persistenter RubberBand
         if not hasattr(self, "result_rb") or self.result_rb is None:
             self.result_rb = QgsRubberBand(self.iface.mapCanvas(), QgsWkbTypes.LineGeometry)
-            self.result_rb.setColor(Qt.red); self.result_rb.setWidth(2)
+            self.result_rb.setColor(Qt.red)
+            self.result_rb.setWidth(2)
         else:
             self.result_rb.reset()
 
+        # Layer holen
         ha_layer_list = QgsProject.instance().mapLayersByName("LWL_Hauseinfuehrung")
         if not ha_layer_list:
-            self.iface.messageBar().pushMessage("Fehler", "Layer 'LWL_Hauseinfuehrung' nicht gefunden.", level=Qgis.Critical); return
+            self._msg("error", "Layer 'LWL_Hauseinfuehrung' nicht gefunden.")
+            return
         ha_layer = ha_layer_list[0]
 
         def on_pick_ha(feature, layer):
@@ -744,51 +749,69 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
                 vkg_id = int(self.gewaehlter_verteiler)
                 intervall = self.ermittle_freies_intervall(start_lr_id, int(self.gewaehlte_rohrnummer), vkg_id)
                 if not intervall:
-                    self.iface.messageBar().pushMessage("Hinweis", "Am Andock-LR ist für diese Rohrnummer kein freier Abschnitt vorhanden.", level=Qgis.Warning)
+                    self._msg("warn", "Am Andock-LR ist für diese Rohrnummer kein freier Abschnitt vorhanden.")
                     return
                 self.freies_intervall = intervall
 
-                # LR-Geometrie holen (für die spätere Orientierung + Prüfung)
+                # LR-Geometrie holen (für Orientierung + Prüfung)
                 lr_layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr")[0]
-                lr_feat  = next((f for f in lr_layer.getFeatures() if f["id"] == start_lr_id), None)
+                lr_feat = next((f for f in lr_layer.getFeatures() if f["id"] == start_lr_id), None)
                 if not lr_feat:
-                    self.iface.messageBar().pushMessage("Fehler", "Parent-Leerrohr der HE nicht gefunden.", level=Qgis.Critical); return
-                g_lr = QgsGeometry(lr_feat.geometry()); tr2 = QgsCoordinateTransform(lr_layer.crs(), self.iface.mapCanvas().mapSettings().destinationCrs(), QgsProject.instance()); _ = g_lr.transform(tr2)
+                    self._msg("error", "Parent-Leerrohr der HE nicht gefunden.")
+                    return
+                g_lr = QgsGeometry(lr_feat.geometry())
+                tr2 = QgsCoordinateTransform(lr_layer.crs(), self.iface.mapCanvas().mapSettings().destinationCrs(), QgsProject.instance())
+                _ = g_lr.transform(tr2)
 
-                # nächster Punkt der HE am LR → Fraction bestimmen und gegen Intervall prüfen
-                # (wir nutzen denselben Mechanismus wie im Tool: Projektions-Fraction)
+                # Quick-Check: liegt der Abzweig im freien Intervall?
                 tool_probe = GuidedStartLineTool(self.iface.mapCanvas(), g_lr, None, mode="lr", free_interval=self.freies_intervall, parent_lr_geom=g_lr)
-                # nimm den HE-Punkt, der dem LR am nächsten liegt:
                 he_pt = g.closestSegmentWithContext(g_lr.centroid().asPoint())[1]  # grobe Annäherung
                 s_ok = tool_probe._project_fraction(g_lr, he_pt)
                 if not (self.freies_intervall[0] <= s_ok <= self.freies_intervall[1]):
-                    self.iface.messageBar().pushMessage("Hinweis", "Abzweigpunkt liegt nicht im freien LR-Abschnitt der gewählten Rohrnummer.", level=Qgis.Warning)
+                    self._msg("warn", "Abzweigpunkt liegt nicht im freien LR-Abschnitt der gewählten Rohrnummer.")
                     return
 
                 def on_finish(points):
                     if len(points) < 2:
-                        self.iface.messageBar().pushMessage("Fehler", "Mindestens zwei Punkte erforderlich.", level=Qgis.Critical); return
+                        self._msg("error", "Mindestens zwei Punkte erforderlich.")
+                        return
+
+                    # Startpunkt exakt aufs LR snappen (falls möglich)
+                    try:
+                        lr_id = getattr(self, "startpunkt_id", None)
+                        if lr_id:
+                            lr_layer2 = QgsProject.instance().mapLayersByName("LWL_Leerrohr")[0]
+                            lr_feat2 = next((f for f in lr_layer2.getFeatures() if f["id"] == lr_id), None)
+                            if lr_feat2:
+                                g_lr2 = QgsGeometry(lr_feat2.geometry())
+                                tr_ = QgsCoordinateTransform(lr_layer2.crs(), self.iface.mapCanvas().mapSettings().destinationCrs(), QgsProject.instance())
+                                _ = g_lr2.transform(tr_)
+                                p0s = g_lr2.closestSegmentWithContext(points[0])[1]
+                                points[0] = QgsPointXY(p0s)
+                    except Exception:
+                        pass
+
                     self.erfasste_geom = QgsGeometry.fromPolylineXY(points)
                     self.result_rb.setToGeometry(self.erfasste_geom, None)
-                    self.iface.messageBar().pushMessage("Info", "HA-Linie ab bestehender HA erfasst.", level=Qgis.Success)
+                    self._msg("ok", "HA-Linie ab bestehender HA erfasst.")
                     self.iface.mapCanvas().unsetMapTool(self.map_tool)
 
-                # HA-Modus mit LR-Hint + Clamp am freien Intervall der Rohrnummer
+                # HA-Modus (geführt entlang der Bestands-HE); freier Abschnitt wird respektiert
                 self.map_tool = GuidedStartLineTool(
                     self.iface.mapCanvas(), g, on_finish,
                     mode="ha", persist_rb=self.result_rb, parent_lr_geom=g_lr
                 )
-                # zusätzlich: Clamp auch für den 1. Klick am LR (falls sofort Richtung LR geklickt wird)
                 self.map_tool.free_interval = self.freies_intervall
                 self.iface.mapCanvas().setMapTool(self.map_tool)
-                self.iface.messageBar().pushMessage("Info", "Abzweig: erster Punkt entlang Bestands-HE; Start nur im freien LR-Abschnitt möglich.", level=Qgis.Info)
+                self._msg("info", "Abzweigmodus aktiv: erster Punkt entlang Bestands-HE; Start nur im freien LR-Abschnitt.")
 
             except Exception as e:
-                self.iface.messageBar().pushMessage("Fehler", f"Abzweig-Start fehlgeschlagen: {e}", level=Qgis.Critical)
+                self._msg("error", f"Abzweig-Start fehlgeschlagen: {e}")
 
+        # HE zum Andocken wählen
         self.click_selector = ClickSelector(self.iface.mapCanvas(), [ha_layer], on_pick_ha, self.iface)
         self.iface.mapCanvas().setMapTool(self.click_selector)
-        self.iface.messageBar().pushMessage("Info", "Bitte bestehende HE zum Andocken wählen.", level=Qgis.Info)
+        self._msg("info", "Bitte bestehende HE zum Andocken wählen.")
 
     def handle_checkbox_direkt(self, state):
         """Aktiviert/Deaktiviert den Button zur Auswahl des Parent-Leerrohrs."""
@@ -1256,34 +1279,86 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.ui.graphicsView_Farben_Rohre.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.iface.messageBar().pushMessage("Info", "Rohre (rohrgenau) angezeigt.", level=Qgis.Success)
 
-    def _msg(self, level: str, text: str, append: bool = True):
+    def _msg(self, level: str, text: str, append: bool = False):
         """
         level: 'info' | 'warn' | 'error' | 'ok'
-        schreibt Meldungen ins label_Pruefung (statt MessageBar)
+        Zeigt genau EINE (die letzte) Meldung im UI-Feld 'label_Pruefung' an
+        und färbt den Hintergrund je nach Level. Unterstützt QLabel, QTextEdit,
+        QPlainTextEdit. Fallback: QGIS-MessageBar.
         """
+        import html as _html
+
+        # Farben (BG, FG)
+        style_map = {
+            "info":  ("#fff3cd", "#664d03"),  # gelb (Hinweis)
+            "warn":  ("#ffe5b4", "#7a3e00"),  # orange (Warnung)
+            "error": ("#f8d7da", "#842029"),  # rot (Fehler)
+            "ok":    ("#d1e7dd", "#0f5132"),  # grün (OK)
+        }
+        prefix_map = {"info": "Hinweis", "warn": "Warnung", "error": "Fehler", "ok": "OK"}
+
+        lvl = level if level in style_map else "info"
+        bg, fg = style_map[lvl]
+        prefix = prefix_map[lvl]
+        html_text = f'<b>{prefix}:</b> {_html.escape(str(text))}'
+        plain_text = f"{prefix}: {text}"
+
+        lbl = getattr(self.ui, "label_Pruefung", None)
+
+        def apply_widget_style(widget):
+            # einheitlicher Look (Padding + runde Ecken)
+            widget.setStyleSheet(
+                f"background-color:{bg}; color:{fg}; "
+                f"padding:6px 8px; border-radius:6px; "
+                f"font-size:12pt;"
+            )
+
         try:
-            import html as _html
-            lbl = getattr(self.ui, "label_Pruefung", None)
             if lbl is None:
-                # Fallback, falls das Label im Dialog unerwartet fehlt
-                try:
-                    from qgis.core import Qgis
-                    self.iface.messageBar().pushMessage("Hinweis", text, level={
-                        "info": Qgis.Info, "warn": Qgis.Warning, "error": Qgis.Critical, "ok": Qgis.Success
-                    }.get(level, Qgis.Info))
-                except Exception:
-                    pass
+                # Fallback QGIS-MessageBar
+                from qgis.core import Qgis
+                self.iface.messageBar().clearWidgets()
+                self.iface.messageBar().pushMessage(prefix, str(text), level={
+                    "info": Qgis.Info, "warn": Qgis.Warning, "error": Qgis.Critical, "ok": Qgis.Success
+                }[lvl])
                 return
-            color = {"info": "#1f6feb", "warn": "#d29922", "error": "#f85149", "ok": "#238636"}.get(level, "#1f6feb")
-            prefix = {"info": "Hinweis", "warn": "Warnung", "error": "Fehler", "ok": "OK"}.get(level, "Hinweis")
-            snippet = f'<span style="color:{color};font-weight:600">{prefix}:</span> {_html.escape(str(text))}'
-            if append and lbl.text():
-                lbl.setText(lbl.text() + "<br/>" + snippet)
-            else:
-                lbl.setText(snippet)
+
+            # QLabel
+            if hasattr(lbl, "setText") and hasattr(lbl, "text") and not hasattr(lbl, "setHtml"):
+                apply_widget_style(lbl)
+                lbl.setText(html_text)   # QLabel kann simples HTML (b, br, span)
+                return
+
+            # QTextEdit (bevorzugt HTML)
+            if hasattr(lbl, "setHtml") and hasattr(lbl, "toHtml"):
+                apply_widget_style(lbl)
+                lbl.setReadOnly(True)
+                lbl.setHtml(html_text)   # immer überschreiben (append=False default)
+                return
+
+            # QPlainTextEdit oder generisch PlainText
+            if hasattr(lbl, "setPlainText") and hasattr(lbl, "toPlainText"):
+                apply_widget_style(lbl)
+                if hasattr(lbl, "setReadOnly"):
+                    lbl.setReadOnly(True)
+                lbl.setPlainText(plain_text)
+                return
+
+            # Unbekannter Widget-Typ → Fallback
+            from qgis.core import Qgis
+            self.iface.messageBar().clearWidgets()
+            self.iface.messageBar().pushMessage(prefix, str(text), level={
+                "info": Qgis.Info, "warn": Qgis.Warning, "error": Qgis.Critical, "ok": Qgis.Success
+            }[lvl])
+
         except Exception:
-            # ganz still bleiben, Label-Ausgaben sollen nie crashen
-            pass
+            # Letzter Fallback, niemals crashen
+            try:
+                from qgis.core import Qgis
+                self.iface.messageBar().clearWidgets()
+                self.iface.messageBar().pushMessage(prefix, str(text), level=Qgis.Info)
+            except Exception:
+                pass
 
     def pruefe_rohrwahl_vor_digitisieren(self, quelle: str = "") -> bool:
         """
@@ -1593,16 +1668,17 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         # Direktmodus erlaubt Rohr=0 – sonst Rohrpflicht
         if not self.ui.checkBox_direkt.isChecked():
             if not getattr(self, "gewaehlte_rohrnummer", None):
-                self.iface.messageBar().pushMessage("Hinweis", "Bitte zuerst eine Rohrnummer wählen.", level=Qgis.Warning)
+                self._msg("warn", "Bitte zuerst eine Rohrnummer wählen.")
                 return
             if not hasattr(self, "freies_intervall"):
-                self.iface.messageBar().pushMessage("Hinweis", "Rohr gewählt – freier Abschnitt wird ermittelt. Bitte erneut starten.", level=Qgis.Info)
+                self._msg("info", "Rohr gewählt – freier Abschnitt wird ermittelt. Bitte Aktion erneut starten.")
                 return
 
         # persistenter RB
         if not hasattr(self, "result_rb") or self.result_rb is None:
             self.result_rb = QgsRubberBand(self.iface.mapCanvas(), QgsWkbTypes.LineGeometry)
-            self.result_rb.setColor(Qt.red); self.result_rb.setWidth(2)
+            self.result_rb.setColor(Qt.red)
+            self.result_rb.setWidth(2)
         else:
             self.result_rb.reset()
 
@@ -1614,7 +1690,8 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
             kn_layer = QgsProject.instance().mapLayersByName("LWL_Knoten")[0]
             vk = next((f for f in kn_layer.getFeatures() if f["id"] == vkg_hint), None)
             if not vk:
-                self.iface.messageBar().pushMessage("Fehler", "Kein Verteilerkasten gewählt.", level=Qgis.Critical); return
+                self._msg("error", "Kein Verteilerkasten gewählt.")
+                return
             ref_geom = QgsGeometry(vk.geometry())
             tr = QgsCoordinateTransform(kn_layer.crs(), self.iface.mapCanvas().mapSettings().destinationCrs(), QgsProject.instance())
             _ = ref_geom.transform(tr)
@@ -1629,7 +1706,8 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
                 layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr")[0]
                 feat = next((f for f in layer.getFeatures() if f["id"] == self.startpunkt_id), None)
             if not feat:
-                self.iface.messageBar().pushMessage("Fehler", "Kein Parent-Leerrohr/Abzweigung gewählt.", level=Qgis.Critical); return
+                self._msg("error", "Kein Parent-Leerrohr/Abzweigung gewählt.")
+                return
             ref_geom = QgsGeometry(feat.geometry())
             tr = QgsCoordinateTransform(layer.crs(), self.iface.mapCanvas().mapSettings().destinationCrs(), QgsProject.instance())
             _ = ref_geom.transform(tr)
@@ -1637,10 +1715,11 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
 
         def on_finish(points):
             if len(points) < 2:
-                self.iface.messageBar().pushMessage("Fehler", "Mindestens zwei Punkte erforderlich.", level=Qgis.Critical); return
+                self._msg("error", "Mindestens zwei Punkte erforderlich.")
+                return
             self.erfasste_geom = QgsGeometry.fromPolylineXY(points)
             self.result_rb.setToGeometry(self.erfasste_geom, None)
-            self.iface.messageBar().pushMessage("Info", "HA-Linie erfasst.", level=Qgis.Success)
+            self._msg("ok", "HA-Linie erfasst.")
 
         self.map_tool = GuidedStartLineTool(
             self.iface.mapCanvas(),
@@ -1650,13 +1729,13 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
             vkg_hint_id=vkg_hint,
             persist_rb=self.result_rb
         )
-        # ganz wichtig: freien Startbereich durchreichen
+        # freien Startbereich durchreichen
         if ref_mode == "lr":
-            self.map_tool.free_interval = getattr(self, "freies_intervall", (0.0,1.0))
+            self.map_tool.free_interval = getattr(self, "freies_intervall", (0.0, 1.0))
             self.map_tool.parent_lr_geom = ref_geom
 
         self.iface.mapCanvas().setMapTool(self.map_tool)
-        self.iface.messageBar().pushMessage("Info", "Klicken: Punkte setzen • Rechtsklick: beenden. Startpunkt nur im freien LR-Abschnitt.", level=Qgis.Info)
+        self._msg("info", "Klicken: Punkte setzen • Rechtsklick: beenden. Startpunkt nur im freien LR-Abschnitt.")
 
     def aufschliessungspunkt_verwalten(self, state):
         """Aktiviert/Deaktiviert den Adressauswahlbutton basierend auf der Checkbox."""
