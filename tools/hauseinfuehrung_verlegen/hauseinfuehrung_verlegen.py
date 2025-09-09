@@ -6,13 +6,210 @@ Verlegt Hauseinführungen durch Auswahl von Parent Leerrohr, Verlauf und Endpunk
 
 from PyQt5.QtCore import Qt, QRectF, QObject, pyqtSignal, QPointF, QSettings, QDateTime
 from PyQt5.QtWidgets import QDialog, QGraphicsScene, QGraphicsSimpleTextItem, QGraphicsRectItem, QGraphicsPolygonItem, QDialogButtonBox, QLineEdit, QTextEdit, QGraphicsLineItem
-from qgis.core import QgsProject, Qgis, QgsFeatureRequest, QgsDataSourceUri, QgsWkbTypes, QgsGeometry, QgsPointXY, QgsVectorLayer, QgsFeature, QgsCoordinateReferenceSystem, QgsMessageLog
+from qgis.core import QgsProject, Qgis, QgsFeatureRequest, QgsCoordinateTransform, QgsDataSourceUri, QgsWkbTypes, QgsGeometry, QgsPointXY, QgsVectorLayer, QgsFeature, QgsCoordinateReferenceSystem, QgsMessageLog
 from qgis.gui import QgsHighlight, QgsMapToolEmitPoint, QgsRubberBand, QgsMapTool
 from PyQt5.QtGui import QColor, QBrush, QFont, QPolygonF, QMouseEvent, QPen
 import psycopg2
 import base64
 import json
 from .hauseinfuehrung_verlegen_dialog import Ui_HauseinfuehrungsVerlegungsToolDialogBase
+
+class GuidedStartLineTool(QgsMapTool):
+    """
+    Geführte HA-Digitalisierung:
+    - Vor 1. Klick: Cursor gleitet auf Referenz (LR/HA/VKG), Korridor bis Snap wird live gezeigt.
+    - Regeln:
+      * mode="ha": Korridor IMMER vom Start (Hausanschluss/erster Vertex) bis Snap-Punkt.
+      * mode="lr": Korridor vom VKG-Ende des Leerrohrs bis Snap-Punkt (Ende näher am VKG).
+    - Beim 1. Klick: Korridorpunkte werden übernommen; Führung ist aus. Danach freie Digitalisierung.
+    """
+    def __init__(self, canvas, snap_ref_geom, on_finish, mode="lr", vkg_hint_id=None, persist_rb=None):
+        super().__init__(canvas)
+        from qgis.gui import QgsVertexMarker
+        self.canvas = canvas
+        self.snap_ref_geom = snap_ref_geom        # QgsGeometry (Point/Line/MultiLine)
+        self.on_finish = on_finish
+        self.mode = mode                          # "lr" oder "ha"
+        self.vkg_hint_id = vkg_hint_id            # VKG-Knoten-ID (nur für mode="lr" genutzt)
+        self.persist_rb = persist_rb
+        self.points = []
+        self.guided_done = False
+
+        self.tmp_rb = QgsRubberBand(self.canvas, QgsWkbTypes.LineGeometry)
+        self.tmp_rb.setWidth(2); self.tmp_rb.setColor(Qt.red)
+
+        self.marker = QgsVertexMarker(self.canvas)
+        self.marker.setIconType(self.marker.ICON_CROSS); self.marker.setIconSize(12); self.marker.setPenWidth(2)
+        self.setCursor(Qt.CrossCursor)
+
+    # ---------- Helpers ----------
+    def _closest_on(self, geom_line, mappt):
+        return QgsPointXY(geom_line.closestSegmentWithContext(mappt)[1])
+
+    def _polyline_parts(self, g: QgsGeometry):
+        """Liste von Polylines (je Teil): [[QgsPointXY,...], ...]."""
+        if not g or g.isEmpty():
+            return []
+        if g.isMultipart():
+            m = g.asMultiPolyline() or []
+            return [[QgsPointXY(p) for p in part] for part in m if part]
+        pl = g.asPolyline()
+        if pl:
+            return [[QgsPointXY(p) for p in pl]]
+        try:
+            coords = list(g.constGet().coordinates())
+            return [[QgsPointXY(v) for v in coords]] if coords else []
+        except Exception:
+            return []
+
+    def _closest_segment_idx(self, poly, q: QgsPointXY):
+        best_i, best_d = 0, float("inf")
+        qg = QgsGeometry.fromPointXY(q)
+        for i in range(len(poly)-1):
+            d = QgsGeometry.fromPolylineXY([poly[i], poly[i+1]]).distance(qg)
+            if d < best_d:
+                best_d, best_i = d, i
+        return best_i
+
+    def _interp_on_segment(self, a: QgsPointXY, b: QgsPointXY, q: QgsPointXY):
+        ax, ay, bx, by, qx, qy = a.x(), a.y(), b.x(), b.y(), q.x(), q.y()
+        vx, vy = bx-ax, by-ay
+        denom = vx*vx + vy*vy
+        if denom == 0:
+            return QgsPointXY(ax, ay)
+        t = ((qx-ax)*vx + (qy-ay)*vy) / denom
+        t = max(0.0, min(1.0, t))
+        return QgsPointXY(ax + t*vx, ay + t*vy)
+
+    def _pick_lr_start_end(self, poly, vkg_id):
+        """Wähle LR-Startende: das Ende, das näher am VKG liegt."""
+        try:
+            kn_layer = QgsProject.instance().mapLayersByName("LWL_Knoten")[0]
+            vkg_feat = next((f for f in kn_layer.getFeatures() if f["id"] == vkg_id), None)
+            if vkg_feat:
+                vpt = vkg_feat.geometry().asPoint()
+                d0 = QgsGeometry.fromPointXY(poly[0]).distance(QgsGeometry.fromPointXY(vpt))
+                d1 = QgsGeometry.fromPointXY(poly[-1]).distance(QgsGeometry.fromPointXY(vpt))
+                return 0 if d0 <= d1 else len(poly)-1
+        except Exception:
+            pass
+        # Fallback: vorn
+        return 0
+
+    def _corr_points(self, ref_geom: QgsGeometry, snap_pt: QgsPointXY):
+        """
+        Korridor bis snap_pt.
+        - mode="ha": vom LR-Ende (letzter Vertex der Bestands-HA) → projizierter Snap-Punkt,
+                    entlang der Original-Vertices (keine Gerade).
+        - mode="lr": vom VKG-Ende → snap (unverändert).
+        """
+        if QgsWkbTypes.geometryType(ref_geom.wkbType()) == QgsWkbTypes.PointGeometry:
+            return [QgsPointXY(ref_geom.asPoint())]
+
+        parts = self._polyline_parts(ref_geom)
+        if not parts:
+            return []
+
+        if self.mode == "ha":
+            poly = parts[0]  # i. d. R. single part
+            # nächstes Segment zum Snap finden
+            qg = QgsGeometry.fromPointXY(snap_pt)
+            best_i, best_d = 0, float("inf")
+            for i in range(len(poly)-1):
+                d = QgsGeometry.fromPolylineXY([poly[i], poly[i+1]]).distance(qg)
+                if d < best_d:
+                    best_d, best_i = d, i
+            # punkt auf segment projizieren
+            proj = self._interp_on_segment(poly[best_i], poly[best_i+1], snap_pt)
+            # >>> Reihenfolge: LR-Ende -> ... -> poly[i+1] -> proj  (proj ans ENDE!)
+            tail_forward = poly[best_i+1:]                 # i+1 .. Ende (vorwärts)
+            pts = list(reversed(tail_forward))             # Ende .. i+1 (vom LR-Ende rückwärts)
+            pts.append(proj)                               # zuletzt der kurze Abschnitt zum proj
+            return pts
+
+        # --- LR-Modus: wie gehabt ---
+        qg = QgsGeometry.fromPointXY(snap_pt)
+        best_part, best_idx, best_d = None, 0, float("inf")
+        for part in parts:
+            for i in range(len(part)-1):
+                d = QgsGeometry.fromPolylineXY([part[i], part[i+1]]).distance(qg)
+                if d < best_d:
+                    best_d, best_part, best_idx = d, part, i
+        poly = best_part
+        proj = self._interp_on_segment(poly[best_idx], poly[best_idx+1], snap_pt)
+        start_idx = self._pick_lr_start_end(poly, self.vkg_hint_id)
+        if start_idx == 0:
+            return poly[:best_idx+1] + [proj]
+        tail = list(reversed(poly[best_idx+1:]))
+        return [proj] + tail
+
+    # ---------- Events ----------
+    def canvasMoveEvent(self, e):
+        mappt = self.toMapCoordinates(e.pos())
+        if not self.guided_done and self.snap_ref_geom and not self.snap_ref_geom.isEmpty():
+            if QgsWkbTypes.geometryType(self.snap_ref_geom.wkbType()) == QgsWkbTypes.PointGeometry:
+                mappt = QgsPointXY(self.snap_ref_geom.asPoint())
+                self.tmp_rb.reset()
+            else:
+                mappt = self._closest_on(self.snap_ref_geom, mappt)
+                pts = self._corr_points(self.snap_ref_geom, mappt)
+                if pts:
+                    self.tmp_rb.setToGeometry(QgsGeometry.fromPolylineXY(pts), None)
+            self.marker.setCenter(mappt); self.marker.show()
+        else:
+            self.marker.hide()
+            if self.points:
+                self.tmp_rb.setToGeometry(QgsGeometry.fromPolylineXY(self.points + [QgsPointXY(mappt)]), None)
+
+    def canvasPressEvent(self, e):
+        if e.button() != Qt.LeftButton:
+            return
+        mappt = self.toMapCoordinates(e.pos())
+
+        if not self.guided_done and self.snap_ref_geom and not self.snap_ref_geom.isEmpty():
+            # 1. Klick
+            if QgsWkbTypes.geometryType(self.snap_ref_geom.wkbType()) == QgsWkbTypes.PointGeometry:
+                # Direkt am VKG
+                self.points.append(QgsPointXY(self.snap_ref_geom.asPoint()))
+            else:
+                # Snap auf Referenzlinie
+                snap_pt = self._closest_on(self.snap_ref_geom, mappt)
+
+                if self.mode == "lr":
+                    # WICHTIG: Leerrohr-Modus -> NUR den Schnittpunkt übernehmen,
+                    # KEIN Korridor entlang des LR vorbefüllen!
+                    self.points.append(QgsPointXY(snap_pt))
+                else:
+                    # HA-Modus -> Korridor vom LR-Ende der Bestands-HA bis zum Snap übernehmen (wie zuletzt gebaut)
+                    pts = self._corr_points(self.snap_ref_geom, snap_pt)
+                    self.points.extend(pts if pts else [QgsPointXY(snap_pt)])
+
+            # Führung beenden
+            self.guided_done = True
+            self.marker.hide()
+            self.tmp_rb.setToGeometry(QgsGeometry.fromPolylineXY(self.points), None)
+
+        else:
+            # weitere Punkte frei setzen
+            self.points.append(QgsPointXY(mappt))
+            self.tmp_rb.setToGeometry(QgsGeometry.fromPolylineXY(self.points), None)
+
+    def canvasReleaseEvent(self, e):
+        if e.button() == Qt.RightButton:
+            if len(self.points) >= 2 and self.on_finish:
+                self.on_finish(self.points)
+                if self.persist_rb and len(self.points) >= 2:
+                    self.persist_rb.setToGeometry(QgsGeometry.fromPolylineXY(self.points), None)
+            self.deactivate(); self.canvas.unsetMapTool(self)
+
+    def deactivate(self):
+        super().deactivate()
+        try:
+            self.tmp_rb.reset()
+            self.marker.hide()
+        except Exception:
+            pass
+        self.points = []
 
 class ClickableRect(QGraphicsRectItem):
     def __init__(self, x, y, width, height, rohrnummer, farb_id, callback, parent=None):
@@ -64,38 +261,71 @@ class ClickSelector(QgsMapTool):
             self.iface.messageBar().pushMessage("Hinweis", "Kein passendes Objekt im Toleranzbereich gefunden.", level=Qgis.Warning)
 
 class CustomLineCaptureTool(QgsMapTool):
-    """Ein benutzerdefiniertes Werkzeug zur Digitalisierung einer Linie."""
-    def __init__(self, canvas, capture_callback, finalize_callback):
+    """Digitalisiert eine Linie mit Live-Vorschau:
+       - 1. Punkt: sichtbar, an Snap-Geometrie geführt (Knoten fix, Rohr entlang Linie)
+       - weitere Punkte: frei, mit RubberBand-Vorschau
+    """
+    def __init__(self, canvas, capture_callback, finalize_callback, snap_geometry=None):
         super().__init__(canvas)
+        from qgis.gui import QgsVertexMarker
         self.canvas = canvas
         self.capture_callback = capture_callback
         self.finalize_callback = finalize_callback
         self.points = []
+        self.snap_geometry = snap_geometry  # QgsGeometry (Point oder LineString)
+        self.preview_marker = QgsVertexMarker(self.canvas)
+        self.preview_marker.setIconSize(12)
+        self.preview_marker.setIconType(QgsVertexMarker.ICON_CROSS)
+        self.preview_marker.setPenWidth(2)
+        self.preview_marker.hide()
+        self.setCursor(Qt.CrossCursor)
 
     def canvasPressEvent(self, event):
-        """Wird aufgerufen, wenn die Maus gedrückt wird."""
         if event.button() == Qt.LeftButton:
-            # Linke Maustaste: Punkt hinzufügen
-            point = self.toMapCoordinates(event.pos())
-            self.points.append(QgsPointXY(point))
-            self.capture_callback(point)
+            mappt = self.toMapCoordinates(event.pos())
+            # 1. Punkt ggf. auf Snap-Geometrie führen
+            if len(self.points) == 0 and self.snap_geometry is not None and not self.snap_geometry.isEmpty():
+                if self.snap_geometry.wkbType() == QgsWkbTypes.Point:
+                    mappt = self.snap_geometry.asPoint()
+                else:
+                    mappt = self.snap_geometry.closestSegmentWithContext(mappt)[1]
+            self.points.append(QgsPointXY(mappt))
+            if self.capture_callback:
+                self.capture_callback(mappt)
         elif event.button() == Qt.RightButton:
-            # Rechte Maustaste: Linie abschließen
-            self.finalize_callback(self.points)
-            self.points = []  # Punkte zurücksetzen
+            # Abschluss
+            if self.finalize_callback:
+                self.finalize_callback(self.points)
+            self.points = []
 
     def canvasMoveEvent(self, event):
-        """Bewegt die Maus auf der Karte (optional, falls notwendig)."""
-        pass
+        """Live-Vorschau: zeigt 1. Punkt geführt an, danach normaler Verlauf."""
+        try:
+            mappt = self.toMapCoordinates(event.pos())
+            if len(self.points) == 0:
+                # 1. Punkt Vorschau
+                if self.snap_geometry and not self.snap_geometry.isEmpty():
+                    if self.snap_geometry.wkbType() == QgsWkbTypes.Point:
+                        mappt = self.snap_geometry.asPoint()
+                    else:
+                        mappt = self.snap_geometry.closestSegmentWithContext(mappt)[1]
+                self.preview_marker.setCenter(mappt)
+                self.preview_marker.show()
+            else:
+                # Folgepunkte – nur Marker verschieben, RubberBand handled die rufende Klasse
+                self.preview_marker.setCenter(mappt)
+                self.preview_marker.show()
+        except Exception:
+            pass
 
     def canvasReleaseEvent(self, event):
-        """Wird aufgerufen, wenn die Maus losgelassen wird (optional)."""
         pass
 
     def deactivate(self):
-        """Werkzeug deaktivieren."""
         super().deactivate()
         self.points = []
+        if self.preview_marker:
+            self.preview_marker.hide()
 
 class HauseinfuehrungsVerlegungsTool(QDialog):
     instance = None  # Klassenvariable zur Verwaltung der Instanz
@@ -168,6 +398,7 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
 
         self.ui.pushButton_parentLeerrohr.clicked.connect(self.aktion_parent_leerrohr)
         self.ui.pushButton_verlauf_HA.clicked.connect(self.aktion_verlauf)
+        self.ui.pushButton_Abzweigung.clicked.connect(self.aktion_abzweig_von_bestehender_ha)
         self.ui.pushButton_Import.clicked.connect(self.daten_importieren)
         self.ui.pushButton_Datenpruefung.clicked.connect(self.daten_pruefen)
         self.ui.checkBox_direkt.stateChanged.connect(self.handle_checkbox_direkt)
@@ -327,6 +558,110 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
 
         self.click_selector = ClickSelector(self.iface.mapCanvas(), [ha_layer], on_ha_selected, self.iface)
         self.iface.mapCanvas().setMapTool(self.click_selector)
+
+    def aktion_abzweig_von_leerrohr(self):
+        """Erster Punkt gleitet entlang des gewählten Leerrohrs."""
+        # Guard
+        if not getattr(self, "startpunkt_id", None) and not getattr(self, "abzweigung_id", None):
+            self.iface.messageBar().pushMessage("Fehler", "Kein Parent-Leerrohr/Abzweigung gewählt.", level=Qgis.Critical)
+            return
+
+        # Geometrie + CRS holen
+        if self.abzweigung_id:
+            layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr_Abzweigung")[0]
+            feat = next((f for f in layer.getFeatures() if f["id"] == self.abzweigung_id), None)
+        else:
+            layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr")[0]
+            feat = next((f for f in layer.getFeatures() if f["id"] == self.startpunkt_id), None)
+
+        if not feat:
+            self.iface.messageBar().pushMessage("Fehler", "Parent-Feature nicht gefunden.", level=Qgis.Critical)
+            return
+
+        g = QgsGeometry(feat.geometry())
+        # in Karten-CRS transformieren
+        tr = QgsCoordinateTransform(layer.crs(), self.iface.mapCanvas().mapSettings().destinationCrs(), QgsProject.instance())
+        _ = g.transform(tr)
+
+        # Finish-Callback: speichere resultierende Linie
+        def on_finish(points):
+            if len(points) < 2:
+                self.iface.messageBar().pushMessage("Fehler", "Mindestens zwei Punkte erforderlich.", level=Qgis.Critical); return
+
+            # Falls ein Ziel-Leerrohr gewählt ist: P[0] (LR-Seite) exakt aufs LR snappen
+            try:
+                lr_id = getattr(self, "startpunkt_id", None)
+                if lr_id:
+                    lr_layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr")[0]
+                    lr_feat = next((f for f in lr_layer.getFeatures() if f["id"] == lr_id), None)
+                    if lr_feat:
+                        # in Karten-CRS transformieren
+                        from qgis.core import QgsCoordinateTransform, QgsProject, QgsGeometry
+                        g_lr = QgsGeometry(lr_feat.geometry())
+                        tr = QgsCoordinateTransform(lr_layer.crs(), self.iface.mapCanvas().mapSettings().destinationCrs(), QgsProject.instance())
+                        _ = g_lr.transform(tr)
+                        # P[0] auf LR projizieren (P[0] ist LR-Ende der übernommenen HA)
+                        p0 = points[0]
+                        p0s = g_lr.closestSegmentWithContext(p0)[1]
+                        points[0] = QgsPointXY(p0s)
+            except Exception:
+                pass
+
+            self.erfasste_geom = QgsGeometry.fromPolylineXY(points)
+            self.result_rb.setToGeometry(self.erfasste_geom, None)
+            self.iface.messageBar().pushMessage("Info", "HA-Linie ab bestehender HA erfasst.", level=Qgis.Success)
+            self.iface.mapCanvas().unsetMapTool(self.map_tool)
+
+        # Optional: pro Klick noch was tun (z. B. ersten Punkt merken)
+        def on_point(p):
+            if len(getattr(self, "erfasste_punkte", [])) == 0:
+                self.erfasste_punkte = [p]
+            else:
+                self.erfasste_punkte.append(p)
+
+        self.map_tool = GuidedStartLineTool(self.iface.mapCanvas(), g, on_finish, on_point)
+        self.iface.mapCanvas().setMapTool(self.map_tool)
+        self.iface.messageBar().pushMessage("Info", "Klicken: Punkte setzen • Rechtsklick: beenden. Erster Punkt gleitet am Leerrohr.", level=Qgis.Info)
+
+    def aktion_abzweig_von_bestehender_ha(self):
+        """Abzweig von bestehender HA: Korridor IMMER vom HA-Start (Hausanschluss) bis zum Snap-Punkt."""
+        from qgis.core import QgsCoordinateTransform, QgsGeometry, QgsProject
+
+        if not hasattr(self, "result_rb") or self.result_rb is None:
+            self.result_rb = QgsRubberBand(self.iface.mapCanvas(), QgsWkbTypes.LineGeometry)
+            self.result_rb.setColor(Qt.red); self.result_rb.setWidth(2)
+        else:
+            self.result_rb.reset()
+
+        ha_layer_list = QgsProject.instance().mapLayersByName("LWL_Hauseinfuehrung")
+        if not ha_layer_list:
+            self.iface.messageBar().pushMessage("Fehler", "Layer 'LWL_Hauseinfuehrung' nicht gefunden.", level=Qgis.Critical); return
+        ha_layer = ha_layer_list[0]
+
+        def on_pick_ha(feature, layer):
+            try:
+                g = QgsGeometry(feature.geometry())
+                tr = QgsCoordinateTransform(layer.crs(), self.iface.mapCanvas().mapSettings().destinationCrs(), QgsProject.instance())
+                _ = g.transform(tr)
+
+                def on_finish(points):
+                    if len(points) < 2:
+                        self.iface.messageBar().pushMessage("Fehler", "Mindestens zwei Punkte erforderlich.", level=Qgis.Critical); return
+                    self.erfasste_geom = QgsGeometry.fromPolylineXY(points)
+                    self.result_rb.setToGeometry(self.erfasste_geom, None)
+                    self.iface.messageBar().pushMessage("Info", "HA-Linie ab bestehender HA erfasst.", level=Qgis.Success)
+                    self.iface.mapCanvas().unsetMapTool(self.map_tool)
+
+                # HA-Modus → vom Start (Hausanschluss) loslaufen, VKG-Hinweis nicht nötig
+                self.map_tool = GuidedStartLineTool(self.iface.mapCanvas(), g, on_finish, mode="ha", persist_rb=self.result_rb)
+                self.iface.mapCanvas().setMapTool(self.map_tool)
+                self.iface.messageBar().pushMessage("Info", "Erster Punkt gleitet an der gewählten HA (vom Start). Rechtsklick: beenden.", level=Qgis.Info)
+            except Exception as e:
+                self.iface.messageBar().pushMessage("Fehler", f"Abzweig-Start fehlgeschlagen: {e}", level=Qgis.Critical)
+
+        self.click_selector = ClickSelector(self.iface.mapCanvas(), [ha_layer], on_pick_ha, self.iface)
+        self.iface.mapCanvas().setMapTool(self.click_selector)
+        self.iface.messageBar().pushMessage("Info", "Bitte eine bestehende HA zum Andocken wählen.", level=Qgis.Info)
 
     def handle_checkbox_direkt(self, state):
         """Aktiviert/Deaktiviert den Button zur Auswahl des Parent-Leerrohrs."""
@@ -690,6 +1025,31 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.gewaehlte_rohrnummer = int(rohrnummer)
         self.gewaehlte_farb_id = farb_id
 
+    def clear_ha_preview(self):
+        """Alle temporären Zeichenobjekte/Tools bereinigen."""
+        try:
+            # RubberBand der erfassten Linie
+            if hasattr(self, "rubber_band") and self.rubber_band:
+                self.rubber_band.reset()
+        except Exception:
+            pass
+
+        # evtl. zweite Vorschau (falls du self.result_rb verwendest)
+        if hasattr(self, "result_rb") and self.result_rb:
+            try:
+                self.result_rb.reset()
+            except Exception:
+                pass
+            self.result_rb = None
+
+        # evtl. geführtes Capture-Tool beenden
+        if hasattr(self, "map_tool") and self.map_tool:
+            try:
+                self.iface.mapCanvas().unsetMapTool(self.map_tool)
+            except Exception:
+                pass
+            self.map_tool = None
+
     def lade_farben_und_rohrnummern(self, subtyp_id):
         """Lädt Farben und Rohrnummern aus LUT_Leerrohr_SubTyp und LUT_Rohr_Beschreibung."""
         print(f"DEBUG: Parsing ROHR_DEFINITION für Subtyp-ID: {subtyp_id}")
@@ -743,132 +1103,63 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
             return [], None, None
 
     def aktion_verlauf(self):
-        """Erfasst die Liniengeometrie der Hauseinführung mit Snap auf Leerrohr oder Verteilerkasten."""
-        QgsMessageLog.logMessage("DEBUG: Starte aktion_verlauf", "Hauseinfuehrung", Qgis.Info)
-        self.iface.messageBar().pushMessage(
-            "Info", "Bitte digitalisieren Sie die Linie der Hauseinführung (Rechtsklick zum Abschließen).", level=Qgis.Info
-        )
+        """Standard: erster Punkt gleitet sichtbar (LR oder VKG); Korridor wird übernommen."""
+        from qgis.core import QgsCoordinateTransform, QgsProject, QgsGeometry
 
-        # Initialisiere Variablen
-        self.erfasste_punkte = []
-        if hasattr(self, "rubber_band") and self.rubber_band:
-            self.rubber_band.reset()
-        self.rubber_band = QgsRubberBand(self.iface.mapCanvas(), QgsWkbTypes.LineGeometry)
-        self.rubber_band.setColor(Qt.red)
-        self.rubber_band.setWidth(2)
-
-        # Entscheide, welche Geometrie für das Snapping verwendet wird
-        snap_geometry = None
-        layer_crs = None
-        if self.ui.checkBox_direkt.isChecked():
-            # Direktmodus: Snap an Verteilerkasten
-            if not self.gewaehlter_verteiler:
-                self.iface.messageBar().pushMessage(
-                    "Fehler", "Kein Verteilerkasten ausgewählt. Bitte wählen Sie einen Verteilerkasten aus.", level=Qgis.Critical
-                )
-                return
-
-            layer = QgsProject.instance().mapLayersByName("LWL_Knoten")[0]
-            verteiler_feature = next((f for f in layer.getFeatures() if f["id"] == self.gewaehlter_verteiler), None)
-            if not verteiler_feature:
-                self.iface.messageBar().pushMessage(
-                    "Fehler", "Der ausgewählte Verteilerkasten konnte nicht gefunden werden.", level=Qgis.Critical
-                )
-                return
-            snap_geometry = verteiler_feature.geometry()
-            layer_crs = layer.crs()
-            self.iface.messageBar().pushMessage(
-                "Info", f"Verteilerkasten-Geometrie geladen: {snap_geometry.asWkt()}", level=Qgis.Info
-            )
+        # persistenter Ergebnis-RubberBand
+        if not hasattr(self, "result_rb") or self.result_rb is None:
+            self.result_rb = QgsRubberBand(self.iface.mapCanvas(), QgsWkbTypes.LineGeometry)
+            self.result_rb.setColor(Qt.red); self.result_rb.setWidth(2)
         else:
-            # Standardmodus: Snap an Leerrohr oder Abzweigung
-            if self.abzweigung_id:
+            self.result_rb.reset()
+
+        ref_geom = None
+        ref_mode = "lr"
+        vkg_hint = getattr(self, "gewaehlter_verteiler", None)
+
+        if self.ui.checkBox_direkt.isChecked():
+            # Direkt: Punkt am VKG
+            kn_layer = QgsProject.instance().mapLayersByName("LWL_Knoten")[0]
+            vk = next((f for f in kn_layer.getFeatures() if f["id"] == vkg_hint), None)
+            if not vk:
+                self.iface.messageBar().pushMessage("Fehler", "Kein Verteilerkasten gewählt.", level=Qgis.Critical); return
+            ref_geom = QgsGeometry(vk.geometry())
+            tr = QgsCoordinateTransform(kn_layer.crs(), self.iface.mapCanvas().mapSettings().destinationCrs(), QgsProject.instance())
+            _ = ref_geom.transform(tr)
+            ref_mode = "ha"  # Punkt → egal, wir übernehmen einfach den Punkt
+        else:
+            # Leerrohr oder Abzweigung wählen
+            layer = None; feat = None
+            if getattr(self, "abzweigung_id", None):
                 layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr_Abzweigung")[0]
-                feature = next((f for f in layer.getFeatures() if f["id"] == self.abzweigung_id), None)
-                if not feature:
-                    self.iface.messageBar().pushMessage(
-                        "Fehler", "Die ausgewählte Abzweigung konnte nicht gefunden werden.", level=Qgis.Critical
-                    )
-                    return
-                snap_geometry = feature.geometry()
-                layer_crs = layer.crs()
-                self.iface.messageBar().pushMessage(
-                    "Info", f"Abzweigungs-Geometrie geladen: {snap_geometry.asWkt()}", level=Qgis.Info
-                )
-            elif self.startpunkt_id:
+                feat = next((f for f in layer.getFeatures() if f["id"] == self.abzweigung_id), None)
+            elif getattr(self, "startpunkt_id", None):
                 layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr")[0]
-                feature = next((f for f in layer.getFeatures() if f["id"] == self.startpunkt_id), None)
-                if not feature:
-                    self.iface.messageBar().pushMessage(
-                        "Fehler", "Das ausgewählte Leerrohr konnte nicht gefunden werden.", level=Qgis.Critical
-                    )
-                    return
-                snap_geometry = feature.geometry()
-                layer_crs = layer.crs()
-                self.iface.messageBar().pushMessage(
-                    "Info", f"Leerrohr-Geometrie geladen: {snap_geometry.asWkt()}", level=Qgis.Info
-                )
-            else:
-                self.iface.messageBar().pushMessage(
-                    "Fehler", "Kein Parent Leerrohr oder Abzweigung ausgewählt.", level=Qgis.Critical
-                )
-                return
+                feat = next((f for f in layer.getFeatures() if f["id"] == self.startpunkt_id), None)
+            if not feat:
+                self.iface.messageBar().pushMessage("Fehler", "Kein Parent-Leerrohr/Abzweigung gewählt.", level=Qgis.Critical); return
+            ref_geom = QgsGeometry(feat.geometry())
+            tr = QgsCoordinateTransform(layer.crs(), self.iface.mapCanvas().mapSettings().destinationCrs(), QgsProject.instance())
+            _ = ref_geom.transform(tr)
+            ref_mode = "lr"
 
-        if not snap_geometry:
-            self.iface.messageBar().pushMessage(
-                "Fehler", "Snap-Geometrie konnte nicht geladen werden.", level=Qgis.Critical
-            )
-            return
-
-        # Prüfe den Geometrietyp (Linie oder Punkt)
-        geometry_type = snap_geometry.wkbType()
-
-        # Prüfe, ob die Geometrie gültig ist und transformiere sie bei Bedarf
-        project_crs = self.iface.mapCanvas().mapSettings().destinationCrs()
-        if layer_crs != project_crs:
-            self.iface.messageBar().pushMessage(
-                "Info", f"Transformiere Geometrie von {layer_crs.authid()} nach {project_crs.authid()}", level=Qgis.Info
-            )
-            transform = QgsCoordinateTransform(layer_crs, project_crs, QgsProject.instance())
-            snap_geometry = snap_geometry.transform(transform)
-
-        # Callback für Punkt-Erfassung
-        def point_captured(point):
-            """Wird aufgerufen, wenn ein Punkt erfasst wird."""
-            try:
-                if len(self.erfasste_punkte) == 0 and snap_geometry:
-                    # Unterscheide nach Geometrietyp
-                    if geometry_type == QgsWkbTypes.Point:
-                        snapped_point = snap_geometry.asPoint()  # Für Punkte: exakte Koordinate
-                    else:
-                        snapped_point = snap_geometry.closestSegmentWithContext(point)[1]  # Für Linien: nächster Punkt
-                    self.iface.messageBar().pushMessage(
-                        "Info", f"Erster Punkt gesnapped: {snapped_point}.", level=Qgis.Success
-                    )
-                    self.erfasste_punkte.append(QgsPointXY(snapped_point))
-                else:
-                    # Füge nachfolgende Punkte ohne Snapping hinzu
-                    self.erfasste_punkte.append(QgsPointXY(point))
-                # Aktualisiere die Rubberband-Geometrie
-                self.rubber_band.setToGeometry(QgsGeometry.fromPolylineXY(self.erfasste_punkte), None)
-            except Exception as e:
-                self.iface.messageBar().pushMessage(
-                    "Fehler", f"Fehler beim Snapping: {e}", level=Qgis.Critical
-                )
-
-        # Callback für Abschluss der Geometrie
-        def finalize_geometry(points):
-            """Wird aufgerufen, wenn die Linie abgeschlossen wird (Rechtsklick)."""
+        def on_finish(points):
             if len(points) < 2:
-                self.iface.messageBar().pushMessage("Fehler", "Mindestens zwei Punkte erforderlich.", level=Qgis.Critical)
-                return
+                self.iface.messageBar().pushMessage("Fehler", "Mindestens zwei Punkte erforderlich.", level=Qgis.Critical); return
             self.erfasste_geom = QgsGeometry.fromPolylineXY(points)
-            self.iface.messageBar().pushMessage("Info", "Linie erfolgreich erfasst.", level=Qgis.Success)
-            self.iface.mapCanvas().unsetMapTool(self.map_tool)
+            self.result_rb.setToGeometry(self.erfasste_geom, None)
+            self.iface.messageBar().pushMessage("Info", "HA-Linie erfasst.", level=Qgis.Success)
 
-        # Setze das benutzerdefinierte Werkzeug
-        self.map_tool = CustomLineCaptureTool(self.iface.mapCanvas(), point_captured, finalize_geometry)
+        self.map_tool = GuidedStartLineTool(
+            self.iface.mapCanvas(),
+            ref_geom,
+            on_finish,
+            mode=ref_mode,
+            vkg_hint_id=vkg_hint,            # wichtig: LR vom VKG-Ende starten
+            persist_rb=self.result_rb
+        )
         self.iface.mapCanvas().setMapTool(self.map_tool)
+        self.iface.messageBar().pushMessage("Info", "Klicken: Punkte setzen • Rechtsklick: beenden. Korridor wird übernommen.", level=Qgis.Info)
 
     def aufschliessungspunkt_verwalten(self, state):
         """Aktiviert/Deaktiviert den Adressauswahlbutton basierend auf der Checkbox."""
@@ -970,87 +1261,185 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
     def daten_pruefen(self):
         """Führt Prüfungen durch und zeigt Ergebnisse im Label an."""
         QgsMessageLog.logMessage("DEBUG: Starte daten_pruefen", "Hauseinfuehrung", Qgis.Info)
-        fehler = self.pruefungen_durchfuehren()
 
-        if fehler:
-            # Fehlermeldungen im Label anzeigen
-            self.ui.label_Pruefung.setPlainText("\n".join(fehler))
-            self.ui.label_Pruefung.setStyleSheet(
-                "background-color: rgba(255, 0, 0, 0.2); color: black;"  # Leichtes Rot im Hintergrund, schwarze Schrift
-            )
-            self.ui.pushButton_Import.setEnabled(False)  # Import deaktivieren
+        fehler = []
+        hinweise = []
+
+        # Grundprüfungen
+        if self.ui.comboBox_Status.currentText() == "":
+            fehler.append("Bitte wählen Sie einen Status aus.")
+
+        if self.edit_mode:
+            # Update-Fall
+            if not self.ui.checkBox_aufschlieung.isChecked() and (not hasattr(self, "gewaehlte_adresse") or self.gewaehlte_adresse is None):
+                fehler.append("Kein Adresspunkt ausgewählt.")
         else:
-            # Erfolgsmeldung anzeigen
-            self.ui.label_Pruefung.setPlainText("Alle Prüfungen erfolgreich bestanden.")
-            self.ui.label_Pruefung.setStyleSheet(
-                "background-color: rgba(0, 255, 0, 0.2); color: black;"  # Leichtes Grün im Hintergrund, schwarze Schrift
-            )
-            self.ui.pushButton_Import.setEnabled(True)  # Import aktivieren
+            # Neu-Anlage
+            if self.ui.checkBox_direkt.isChecked():
+                if not hasattr(self, "gewaehlter_verteiler") or self.gewaehlter_verteiler is None:
+                    fehler.append("Kein Verteilerkasten ausgewählt.")
+            else:
+                if (not hasattr(self, "startpunkt_id") or self.startpunkt_id is None) and (not hasattr(self, "abzweigung_id") or self.abzweigung_id is None):
+                    fehler.append("Kein Parent Leerrohr oder Abzweigung ausgewählt.")
+                if not hasattr(self, "gewaehlte_rohrnummer") or self.gewaehlte_rohrnummer is None:
+                    fehler.append("Keine Rohrnummer ausgewählt.")
+            if not hasattr(self, "erfasste_geom") or self.erfasste_geom is None:
+                fehler.append("Kein Verlauf der Hauseinführung erfasst.")
+            if not self.ui.checkBox_aufschlieung.isChecked() and (not hasattr(self, "gewaehlte_adresse") or self.gewaehlte_adresse is None):
+                fehler.append("Kein Adresspunkt ausgewählt.")
+
+        # Nur wenn Parent & VKG da sind: Logikprüfungen (Belegung/Erreichbarkeit)
+        if not self.ui.checkBox_direkt.isChecked() and not fehler:
+            try:
+                conn = psycopg2.connect(**self.db_details)
+                cur = conn.cursor()
+
+                is_abzweigung = hasattr(self, "abzweigung_id") and self.abzweigung_id is not None
+                parent_id = self.abzweigung_id if is_abzweigung else self.startpunkt_id
+                vkg_id = self.gewaehlter_verteiler
+
+                # 1) Belegung am gleichen VKG verbieten
+                if is_abzweigung:
+                    cur.execute("""
+                        SELECT 1 FROM lwl."LWL_Hauseinfuehrung"
+                        WHERE "ID_ABZWEIGUNG" = %s AND "VKG_LR" = %s AND "ROHRNUMMER" = %s
+                        LIMIT 1
+                    """, (parent_id, vkg_id, self.gewaehlte_rohrnummer))
+                else:
+                    cur.execute("""
+                        SELECT 1 FROM lwl."LWL_Hauseinfuehrung"
+                        WHERE "ID_LEERROHR" = %s AND "VKG_LR" = %s AND "ROHRNUMMER" = %s
+                        LIMIT 1
+                    """, (parent_id, vkg_id, self.gewaehlte_rohrnummer))
+                if cur.fetchone():
+                    fehler.append(f"Rohrnummer {self.gewaehlte_rohrnummer} ist am gewählten Verteiler bereits durch eine HA belegt.")
+
+                # 2) Erreichbarkeit zum gewählten VKG schnell prüfen (Ende am VKG?)
+                #    (ausreichend, bis das Verbinder-Tool die volle Graph-Prüfung liefert)
+                if is_abzweigung:
+                    cur.execute('SELECT "VONKNOTEN","NACHKNOTEN" FROM lwl."LWL_Leerrohr_Abzweigung" WHERE id=%s', (parent_id,))
+                else:
+                    cur.execute('SELECT "VONKNOTEN","NACHKNOTEN" FROM lwl."LWL_Leerrohr" WHERE id=%s', (parent_id,))
+                row = cur.fetchone()
+                if row:
+                    vonk, nachk = row
+                    if vkg_id not in (vonk, nachk):
+                        hinweise.append("Hinweis: Das gewählte Leerrohr endet nicht direkt am gewählten Verteiler. Prüfe Verbindungen im Verbinder-Tool.")
+                else:
+                    fehler.append("Parent-Objekt konnte nicht gelesen werden.")
+
+                # 3) Zweiter VKG-Fall (gleiche Rohrnummer von der anderen Seite zulassen)
+                #    Gibt es am *anderen* VKG bereits eine HA mit derselben Rohrnummer? -> OK, nur Hinweis.
+                #    (Trim der Geometrie implementieren wir im nächsten Schritt bei daten_importieren)
+                if row:
+                    andere_vkg_kandidaten = []
+                    # Welche Enden sind Verteiler?
+                    cur.execute('SELECT id FROM lwl."LWL_Knoten" WHERE "id" IN (%s,%s) AND "TYP" = %s', (vonk, nachk, 'Verteilerkasten'))
+                    end_vkgs = [r[0] for r in cur.fetchall()]
+                    for k in end_vkgs:
+                        if k != vkg_id:
+                            andere_vkg_kandidaten.append(k)
+
+                    if andere_vkg_kandidaten:
+                        if is_abzweigung:
+                            cur.execute("""
+                                SELECT 1 FROM lwl."LWL_Hauseinfuehrung"
+                                WHERE "ID_ABZWEIGUNG" = %s AND "VKG_LR" = ANY(%s) AND "ROHRNUMMER" = %s
+                                LIMIT 1
+                            """, (parent_id, andere_vkg_kandidaten, self.gewaehlte_rohrnummer))
+                        else:
+                            cur.execute("""
+                                SELECT 1 FROM lwl."LWL_Hauseinfuehrung"
+                                WHERE "ID_LEERROHR" = %s AND "VKG_LR" = ANY(%s) AND "ROHRNUMMER" = %s
+                                LIMIT 1
+                            """, (parent_id, andere_vkg_kandidaten, self.gewaehlte_rohrnummer))
+                        if cur.fetchone():
+                            hinweise.append("Hinweis: Gleiche Rohrnummer ist am anderen Verteiler bereits belegt – diese HA darf bis zum bestehenden virtuellen Knoten geführt werden (Trim erfolgt beim Import).")
+
+                conn.close()
+            except Exception as e:
+                fehler.append(f"Logikprüfung fehlgeschlagen: {e}")
+
+        # Ausgabe
+        if fehler:
+            self.ui.label_Pruefung.setPlainText("\n".join(fehler))
+            self.ui.label_Pruefung.setStyleSheet("background-color: rgba(255, 0, 0, 0.2); color: black;")
+            self.ui.pushButton_Import.setEnabled(False)
+        else:
+            text = "Alle Prüfungen erfolgreich bestanden."
+            if hinweise:
+                text += "\n" + "\n".join(hinweise)
+            self.ui.label_Pruefung.setPlainText(text)
+            self.ui.label_Pruefung.setStyleSheet("background-color: rgba(0, 255, 0, 0.2); color: black;")
+            self.ui.pushButton_Import.setEnabled(True)
 
     def check_available_rohre(self):
-        """Prüft, ob noch verfügbare Rohre existieren."""
+        """
+        Prüft, ob noch verfügbare Rohre existieren.
+        'Verfügbar' = am gewählten VKG nicht durch eine HA belegt.
+        (Verbindungen werden hier bewusst NICHT als Belegung behandelt.)
+        """
+        # Direktmodus: keine Rohrnummern
         if self.ui.checkBox_direkt.isChecked():
-            return True  # Im Direktmodus gibt es keine Rohrnummern-Beschränkung
+            return True
+
+        # Subtyp stabil ermitteln (bevorzugt aus self.subtyp_id_aktiv)
+        subtyp_id = getattr(self, "subtyp_id_aktiv", None)
+        if subtyp_id is None:
+            # Fallback: robust aus Label "SUBTYP: X" parsen
+            try:
+                txt = self.ui.label_subtyp.toPlainText().strip()
+                if txt.upper().startswith("SUBTYP:"):
+                    subtyp_id = int(txt.replace("SUBTYP:", "").strip())
+            except Exception:
+                subtyp_id = None
+
+        if subtyp_id is None:
+            self.iface.messageBar().pushMessage("Fehler", "SUBTYP unbekannt – bitte Parent wählen.", level=Qgis.Critical)
+            return False
+
+        # VKG muss gesetzt sein, sonst macht die Belegungsprüfung keinen Sinn
+        vkg_id = getattr(self, "gewaehlter_verteiler", None)
+        if vkg_id is None:
+            self.iface.messageBar().pushMessage("Fehler", "Kein Verteiler gewählt.", level=Qgis.Critical)
+            return False
+
+        # Parent-ID + Abzweigungs-Flag
+        is_abzweigung = bool(getattr(self, "abzweigung_id", None))
+        parent_id = self.abzweigung_id if is_abzweigung else getattr(self, "startpunkt_id", None)
+        if parent_id is None:
+            self.iface.messageBar().pushMessage("Fehler", "Kein Parent-Objekt gewählt.", level=Qgis.Critical)
+            return False
+
         try:
+            # 1) Alle möglichen Rohrnummern für den aktiven Subtyp holen
+            #    WICHTIG: lade_farben_und_rohrnummern gibt 3 Werte zurück!
+            rohre_def, _subtyp_char, _typ = self.lade_farben_und_rohrnummern(int(subtyp_id))
+            alle_rohrnummern = [r[1] for r in rohre_def]  # Annahme: (rohr_id, rohr_nummer, ...)
+
+            # 2) Belegte Rohrnummern am gewählten VKG aus HA lesen
             conn = psycopg2.connect(**self.db_details)
             cur = conn.cursor()
 
-            is_abzweigung = hasattr(self, "abzweigung_id") and self.abzweigung_id is not None
-            id_ = self.abzweigung_id if is_abzweigung else self.startpunkt_id
-            table_name = '"lwl"."LWL_Leerrohr_Abzweigung"' if is_abzweigung else '"lwl"."LWL_Leerrohr"'
-
-            query = f"""
-                SELECT "VONKNOTEN", "NACHKNOTEN", "VKG_LR"
-                FROM {table_name}
-                WHERE "id" = %s
-            """
-            cur.execute(query, (id_,))
-            result = cur.fetchone()
-
-            if not result:
-                self.iface.messageBar().pushMessage(
-                    "Fehler", f"Das gewählte {'Abzweigung' if is_abzweigung else 'Leerrohr'} wurde nicht gefunden.", level=Qgis.Critical
-                )
-                conn.close()
-                return False
-
-            vonknoten, nachknoten, vkg_lr = result
-
-            query_verteiler = """
-                SELECT "id"
-                FROM "lwl"."LWL_Knoten"
-                WHERE "id" IN (%s, %s) AND "TYP" = 'Verteilerkasten'
-            """
-            cur.execute(query_verteiler, (vonknoten, nachknoten))
-            verteiler = cur.fetchall()
-            verteiler_ids = [v[0] for v in verteiler]
-
             if is_abzweigung:
-                query_belegte_rohre = """
+                cur.execute("""
                     SELECT DISTINCT ha."ROHRNUMMER"
                     FROM "lwl"."LWL_Hauseinfuehrung" ha
-                    WHERE ha."ID_ABZWEIGUNG" = %s
-                    AND ha."VKG_LR" = %s
-                """
+                    WHERE ha."ID_ABZWEIGUNG" = %s AND ha."VKG_LR" = %s
+                """, (parent_id, vkg_id))
             else:
-                query_belegte_rohre = """
+                cur.execute("""
                     SELECT DISTINCT ha."ROHRNUMMER"
                     FROM "lwl"."LWL_Hauseinfuehrung" ha
-                    WHERE ha."ID_LEERROHR" = %s
-                    AND ha."VKG_LR" = %s
-                """
-            cur.execute(query_belegte_rohre, (id_, self.gewaehlter_verteiler))
-            belegte_rohre = [row[0] for row in cur.fetchall()]
+                    WHERE ha."ID_LEERROHR" = %s AND ha."VKG_LR" = %s
+                """, (parent_id, vkg_id))
 
-            # Lade alle möglichen Rohrnummern
-            subtyp_id = self.ui.label_subtyp.toPlainText().replace("SUBTYP: ", "")
-            rohre, _ = self.lade_farben_und_rohrnummern(subtyp_id)
-            alle_rohrnummern = [rohr[1] for rohr in rohre]
-
-            verfügbare_rohre = [num for num in alle_rohrnummern if num not in belegte_rohre]
+            belegte_rohre = {row[0] for row in cur.fetchall() if row[0] is not None}
             conn.close()
 
-            return len(verfügbare_rohre) > 0
+            # 3) Verfügbare = alle minus belegte
+            verfuegbare = [n for n in alle_rohrnummern if n not in belegte_rohre]
+            return len(verfuegbare) > 0
 
         except Exception as e:
             self.iface.messageBar().pushMessage(
@@ -1440,26 +1829,29 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.iface.messageBar().pushMessage("Info", "Formular und Highlights wurden zurückgesetzt.", level=Qgis.Info)
 
     def abbrechen_und_schliessen(self):
-        """Ruft die Formularinitialisierung auf und schließt das Fenster."""
+        """Formular zurücksetzen, Vorschau entfernen, Fenster schließen."""
         QgsMessageLog.logMessage("DEBUG: Starte abbrechen_und_schliessen", "Hauseinfuehrung", Qgis.Info)
-        self.formular_initialisieren()  # Formular zurücksetzen
+        self.clear_ha_preview()          # <--- neu
+        self.formular_initialisieren()   # vorhandene Zurücksetzen-Logik
         self.close()
 
     def closeEvent(self, event):
         """Wird aufgerufen, wenn das Fenster geschlossen wird."""
         QgsMessageLog.logMessage("DEBUG: Starte closeEvent", "Hauseinfuehrung", Qgis.Info)
-        # Entferne alle bestehenden Highlights
+
+        # NEU: zuerst alle temporären Zeichen-/Tool-Objekte entsorgen
+        self.clear_ha_preview()  # <--- neu
+
+        # Bestehende Highlights etc. entfernen
         if self.highlights:
             for highlight in self.highlights:
                 highlight.hide()
             self.highlights.clear()
 
-        # Entferne den Adresspunkt-Highlight, falls vorhanden
         if hasattr(self, "adresspunkt_highlight") and self.adresspunkt_highlight:
             self.adresspunkt_highlight.hide()
             self.adresspunkt_highlight = None
 
-        # Entferne roten Rahmen vom ausgewählten Quadrat
         if self.ausgewaehltes_rechteck:
             try:
                 self.ausgewaehltes_rechteck.setPen(QPen(Qt.black, 1))
@@ -1467,8 +1859,5 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
                 pass
         self.ausgewaehltes_rechteck = None
 
-        # Setze die Klassenvariable zurück, um Mehrfachöffnungen zu verhindern
         HauseinfuehrungsVerlegungsTool.instance = None
-
-        # Rufe die Originalmethode auf
         super().closeEvent(event)

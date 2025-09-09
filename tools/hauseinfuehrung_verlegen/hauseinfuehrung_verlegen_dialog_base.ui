@@ -68,13 +68,13 @@
       <property name="geometry">
        <rect>
         <x>0</x>
-        <y>10</y>
-        <width>441</width>
+        <y>20</y>
+        <width>431</width>
         <height>61</height>
        </rect>
       </property>
       <property name="styleSheet">
-       <string notr="true">padding-left: 8px; padding-top: 5px;</string>
+       <string notr="true">padding-left: 0px; padding-top: 0px;</string>
       </property>
      </widget>
      <widget class="QPushButton" name="pushButton_Import">

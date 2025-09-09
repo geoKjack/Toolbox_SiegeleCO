@@ -33,7 +33,7 @@ class Ui_HauseinfuehrungsVerlegungsToolDialogBase(object):
         self.pushButton_Datenpruefung.setGeometry(QtCore.QRect(439, 20, 80, 25))
         self.pushButton_Datenpruefung.setObjectName("pushButton_Datenpruefung")
         self.label_Pruefung = QtWidgets.QTextEdit(self.groupBox_3)
-        self.label_Pruefung.setGeometry(QtCore.QRect(0, 10, 441, 61))
+        self.label_Pruefung.setGeometry(QtCore.QRect(0, 20, 431, 61))
         self.label_Pruefung.setStyleSheet("padding-left: 8px; padding-top: 5px;")
         self.label_Pruefung.setObjectName("label_Pruefung")
         self.pushButton_Import = QtWidgets.QPushButton(self.groupBox_3)
