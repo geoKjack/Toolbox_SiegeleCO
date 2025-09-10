@@ -14,7 +14,7 @@ Zusatz:
 import base64, json
 from html import escape
 from PyQt5.QtPrintSupport import QPrinter
-from PyQt5.QtCore import Qt, QSettings, QPointF, QLineF, QObject, QEvent, QRectF, QSizeF, QMarginsF, QRect
+from PyQt5.QtCore import Qt, QSettings, QPointF, QLineF, QObject, QEvent, QRectF, QSizeF, QMarginsF, QRect, pyqtSignal
 from PyQt5.QtGui import ( 
     QPainter, QPixmap, QTextDocument, QFont, QPageLayout, QPageSize, 
     QPen, QBrush, QColor, QPolygonF, QPainterPath, QFontMetricsF, QIcon
@@ -23,8 +23,8 @@ from PyQt5.QtWidgets import (
     QDialog, QListWidgetItem, QGraphicsScene, QGraphicsRectItem, QGraphicsPolygonItem, QFileDialog,
     QGraphicsLineItem, QMenu, QAbstractItemView, QGraphicsPathItem, QGraphicsSimpleTextItem, QGraphicsItem
 )
-from qgis.core import QgsProject, QgsFeatureRequest, QgsGeometry, QgsPointXY
-from qgis.gui import QgsMapToolEmitPoint, QgsHighlight
+from qgis.core import QgsProject, QgsFeatureRequest, QgsGeometry, QgsPointXY, QgsWkbTypes, QgsCoordinateTransform
+from qgis.gui import QgsMapToolEmitPoint, QgsHighlight, QgsMapTool, QgsVertexMarker
 import psycopg2
 from . import resources_rc
 from .leerrohr_verbinder_dialog import Ui_KabelVerlegungsToolDialogBase
@@ -52,7 +52,63 @@ class ClickableRect(QGraphicsRectItem):
             self.on_click(self.side, self, self.rohrnr)
         super().mousePressEvent(ev)
 
+from PyQt5.QtCore import Qt, pyqtSignal
+from qgis.gui import QgsMapTool, QgsVertexMarker
+from qgis.core import QgsGeometry, QgsProject, QgsCoordinateTransform
 
+class _SplitPointPickTool(QgsMapTool):
+    # Kompatibilitäts-Signal: existiert, damit alte disconnect()-Aufrufe nicht krachen
+    canvasClicked = pyqtSignal()
+
+    def __init__(self, canvas, lr_geom_map_crs: QgsGeometry, on_fix):
+        super().__init__(canvas)
+        self.canvas = canvas
+        self.lr_geom = lr_geom_map_crs
+        self.on_fix = on_fix
+        self.marker = QgsVertexMarker(self.canvas)
+        self.marker.setIconType(QgsVertexMarker.ICON_CROSS)
+        self.marker.setIconSize(12)
+        self.marker.setPenWidth(2)
+        self.marker.setColor(Qt.red)
+        self.marker.hide()
+        self.setCursor(Qt.CrossCursor)
+
+    def _closest_on_lr(self, map_pt):
+        try:
+            return self.lr_geom.closestSegmentWithContext(map_pt)[1]
+        except Exception:
+            return map_pt
+
+    def canvasMoveEvent(self, e):
+        try:
+            mp = self.toMapCoordinates(e.pos())
+            snap_pt = self._closest_on_lr(mp)
+            self.marker.setCenter(snap_pt)
+            self.marker.show()
+        except Exception:
+            pass
+
+    def canvasPressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            mp = self.toMapCoordinates(e.pos())
+            snap_pt = self._closest_on_lr(mp)
+            if callable(self.on_fix):
+                self.on_fix(snap_pt)
+            # Kompatibilitätssignal feuern (damit evtl. disconnect() später existiert)
+            try:
+                self.canvasClicked.emit()
+            except Exception:
+                pass
+            self.canvas.unsetMapTool(self)
+        elif e.button() == Qt.RightButton:
+            self.canvas.unsetMapTool(self)
+
+    def deactivate(self):
+        super().deactivate()
+        try:
+            self.marker.hide()
+        except Exception:
+            pass
 # --------- Linie mit Status (Kontextmenü) ---------
 class ConnLine(QGraphicsLineItem):
     def __init__(self, line: QLineF, status_id, on_change_status, on_click=None, left_rect=None, right_rect=None):
@@ -135,6 +191,7 @@ class LeerrohrVerbindenTool(QDialog):
         self.sel_lr2_list = []
         self.sel_rect_left = None
         self.paired = []                # [(ClickableRect left, ClickableRect right, ConnLine)]
+        self._wire_parallel_split_ui()
 
         # 2‑Stufen-Steuerung
         self.phase = "trassen"          # "trassen" -> "leerrohre"
@@ -258,15 +315,61 @@ class LeerrohrVerbindenTool(QDialog):
     def showEvent(self, ev):
         super().showEvent(ev); self.raise_(); self.activateWindow()
 
-    def closeEvent(self, ev):
-        if self.map_tool:
-            try: self.map_tool.canvasClicked.disconnect()
-            except TypeError: pass
-            self.iface.mapCanvas().unsetMapTool(self.map_tool); self.map_tool=None
-        if self.highlight:
-            self.highlight.hide(); self.highlight=None
-        LeerrohrVerbindenTool.instance = None
-        super().closeEvent(ev)
+    def closeEvent(self, event):
+        """Sicher schließen: Map-Tool & Marker räumen und Singleton freigeben."""
+        try:
+            canvas = self.iface.mapCanvas() if hasattr(self, "iface") else None
+            tool = getattr(self, "map_tool", None)
+
+            if tool is not None and hasattr(tool, "canvasClicked"):
+                try:
+                    tool.canvasClicked.disconnect()
+                except Exception:
+                    pass
+
+            if canvas is not None and tool is not None:
+                try:
+                    canvas.unsetMapTool(tool)
+                except Exception:
+                    pass
+            self.map_tool = None
+
+            # Marker/RubberBands wegräumen
+            for dname in ("split_markers",):
+                d = getattr(self, dname, None)
+                if isinstance(d, dict):
+                    for mk in d.values():
+                        try:
+                            if mk: mk.hide()
+                        except Exception:
+                            pass
+                    setattr(self, dname, {})
+
+            for attr in ("result_rb", "tmp_rb"):
+                rb = getattr(self, attr, None)
+                if rb:
+                    try: rb.reset()
+                    except Exception: pass
+                    setattr(self, attr, None)
+
+            if hasattr(self, "highlights") and self.highlights:
+                for h in self.highlights:
+                    try: h.hide()
+                    except Exception: pass
+                self.highlights = []
+        except Exception:
+            pass
+
+        # WICHTIG: Singleton freigeben
+        try:
+            type(self).instance = None
+        except Exception:
+            pass
+
+        try:
+            super().closeEvent(event)
+        except Exception:
+            pass
 
     def _load_db(self):
         u = self.settings.value("connection_username","")
@@ -460,6 +563,131 @@ class LeerrohrVerbindenTool(QDialog):
             it.setData(Qt.UserRole, d)
             lw.addItem(it)
 
+    def _wire_parallel_split_ui(self):
+        """Aktiviert Split-Buttons nur wenn Seite im Parallel-Modus ist; startet Split-Pick."""
+        # Buttons initial aus
+        self.ui.pushButton_split1.setEnabled(False)
+        self.ui.pushButton_split2.setEnabled(False)
+
+        # Zustände merken
+        self.split_points = {"left": None, "right": None}   # QgsPointXY in Map-CRS
+        self.split_markers = {"left": None, "right": None}  # QgsVertexMarker
+
+        # Modus-Änderungen verfolgen
+        def _update():
+            self.ui.pushButton_split1.setEnabled(self._is_parallel_side(1))
+            self.ui.pushButton_split2.setEnabled(self._is_parallel_side(2))
+        self.ui.checkBox_1.stateChanged.connect(_update)
+        self.ui.checkBox_2.stateChanged.connect(_update)
+        _update()
+
+        # Clicks
+        self.ui.pushButton_split1.clicked.connect(lambda: self._start_split_pick(side=1))
+        self.ui.pushButton_split2.clicked.connect(lambda: self._start_split_pick(side=2))
+
+    def _start_split_pick(self, side: int):
+        """
+        Startet die Splitpunkt-Erfassung entlang des aktuell in comboBox_AktivLR[1|2] gewählten Leerrohrs.
+        - rotes Kreuz gleitet entlang der LR-Geometrie (Map-CRS)
+        - Linksklick fixiert den Punkt
+        """
+        # aktives LR je Seite auslesen
+        lr_id = None
+        try:
+            cb = self.ui.comboBox_AktivLR1 if side == 1 else self.ui.comboBox_AktivLR2
+            data = cb.currentData() if cb else None
+            # data kann bereits int oder dict sein (wir setzen in _fill_combo_from_list die UserRole)
+            if isinstance(data, dict) and "id" in data:
+                lr_id = int(data["id"])
+            elif isinstance(data, int):
+                lr_id = data
+        except Exception:
+            lr_id = None
+
+        if not lr_id:
+            self._status("Kein aktives Leerrohr ausgewählt.", ok=False)
+            return
+
+        # LR-Geometrie holen und in Map-CRS transformieren
+        lr_layer = self._get_layer("LWL_Leerrohr")
+        if not lr_layer:
+            self._status("Layer 'LWL_Leerrohr' nicht gefunden.", ok=False)
+            return
+        feat = next((f for f in lr_layer.getFeatures(QgsFeatureRequest().setFilterExpression(f'"id" = {lr_id}'))), None)
+        if not feat or not feat.geometry():
+            self._status("Leerrohr-Geometrie nicht gefunden.", ok=False)
+            return
+
+        try:
+            g = QgsGeometry(feat.geometry())
+            tr = QgsCoordinateTransform(lr_layer.crs(), self.iface.mapCanvas().mapSettings().destinationCrs(), QgsProject.instance())
+            _ = g.transform(tr)
+        except Exception as e:
+            self._status(f"CRS-Transformation fehlgeschlagen: {e}", ok=False)
+            return
+
+        canvas = self.iface.mapCanvas()
+
+        def _fix(pt_map_xy):
+            # Speichern + Marker visualisieren
+            key = "left" if side == 1 else "right"
+            self.split_points[key] = pt_map_xy
+
+            # alten Marker entfernen
+            try:
+                mk = self.split_markers.get(key)
+                if mk: mk.hide()
+            except Exception:
+                pass
+
+            from qgis.gui import QgsVertexMarker
+            mk = QgsVertexMarker(canvas)
+            mk.setIconType(QgsVertexMarker.ICON_CROSS)
+            mk.setIconSize(14)
+            mk.setPenWidth(3)
+            mk.setColor(Qt.red)
+            mk.setCenter(pt_map_xy)
+            mk.show()
+            self.split_markers[key] = mk
+
+            # Info ins Label
+            frac = self._project_fraction(g, pt_map_xy)
+            label = self.ui.label_gewaehltes_leerrohr1 if side == 1 else self.ui.label_gewaehltes_leerrohr2
+            try:
+                label.setText(f"Split @ {frac:.1f}% von {self._format_lr_label(lr_id)}")
+                label.setStyleSheet("background-color: lightgreen;")
+            except Exception:
+                pass
+            self._status("Splitpunkt gesetzt.")
+
+        # Tool starten
+        self.map_tool = _SplitPointPickTool(canvas, g, _fix)
+        canvas.setMapTool(self.map_tool)
+        self._status("Bewege das rote Kreuz entlang des Leerrohrs. Linksklick fixiert den Splitpunkt.")
+
+    def _project_fraction(self, line_geom_map_crs: QgsGeometry, pt_map_xy) -> float:
+        """
+        projiziert Punkt auf Liniengeometrie und liefert 0..100 (%) entlang.
+        """
+        try:
+            res = line_geom_map_crs.closestSegmentWithContext(pt_map_xy)
+            snap_pt = res[1]
+            # Länge akkumulieren
+            l_total = line_geom_map_crs.length()
+            if l_total <= 0:
+                return 0.0
+            # Vom Start bis Snap messen: trick über splitAtPoint
+            tmp = QgsGeometry(line_geom_map_crs)
+            parts = tmp.splitGeometry([snap_pt], False)
+            # splitGeometry gibt (ok, [Geoms]) je nach Version; fallback:
+            g0 = tmp  # vor Split verbleibende Teilgeometrie
+            l0 = g0.length() if g0 else 0.0
+            # Sicherheit: clamp
+            frac = max(0.0, min(1.0, l0 / l_total))
+            return 100.0 * frac
+        except Exception:
+            return 0.0
+
     # =====================================================================
     # KARTEN-AUSWAHL – LEERROHR (alte Variante bleibt verfügbar)
     # =====================================================================
@@ -468,14 +696,22 @@ class LeerrohrVerbindenTool(QDialog):
         return self.start_pick_lr_relations()
 
     def start_pick(self, side):
-        self.target_button = side
-        self._status(f"Karte klicken → Leerrohre für {'links' if side=='lr1' else 'rechts'} auswählen.")
-        if self.map_tool:
-            try: self.map_tool.canvasClicked.disconnect()
-            except TypeError: pass
-        self.map_tool = QgsMapToolEmitPoint(self.iface.mapCanvas())
-        self.map_tool.canvasClicked.connect(self._on_canvas_click)
-        self.iface.mapCanvas().setMapTool(self.map_tool)
+        """
+        Kompatibilitäts-Wrapper für alte Aufrufe (z. B. Buttons, die noch start_pick('lr1')/('lr2') nutzen).
+        Nutzt den neuen Split-Pick-Flow und entfernt die alte canvasClicked-Signal-Logik vollständig.
+        side: 'lr1'/'lr2' oder 1/2
+        """
+        try:
+            # Seite normalisieren
+            if isinstance(side, str):
+                s = 1 if side.lower() in ('lr1', 'left', 'l', '1') else 2
+            else:
+                s = int(side)
+
+            # Kein (Dis)connect von canvasClicked mehr – der neue MapTool nutzt Events.
+            self._start_split_pick(s)
+        except Exception as e:
+            self._status(f"Split-Pick konnte nicht gestartet werden: {e}", ok=False)
 
     def _find_verbund_field(self, layer):
         names = [f.name() for f in layer.fields()]
@@ -2229,34 +2465,212 @@ class LeerrohrVerbindenTool(QDialog):
             self._status("Bitte links & rechts wählen.", ok=False); return
         self._status("Datenprüfung: ok.")
 
+    def _db_create_virtual_node(self, cur, lr_id: int, map_x: float, map_y: float, map_srid: int, common_knoten_id: int, position: float | None) -> int:
+        """
+        Legt einen *virtuellen* Knoten direkt in lwl."LWL_Knoten" an.
+        - Transform: map_srid → 31254
+        - Setzt: TYP='Virtueller Knoten', SUBTYP='split', LEERROHR_ID, POSITION (0..1)
+        - KEINE CREATE*-Felder (übernehmen Trigger)
+        """
+        if not isinstance(common_knoten_id, int):
+            raise ValueError("Kein gültiger ID_KNOTEN gesetzt (self.sel_node_id fehlt).")
+
+        pos_val = None if position is None else float(max(0.0, min(1.0, position)))
+
+        try:
+            if pos_val is None:
+                cur.execute(f"""
+                    INSERT INTO lwl."LWL_Knoten"
+                        ("TYP","SUBTYP","LEERROHR_ID","geom")
+                    VALUES
+                        ('Virtueller Knoten','split', %s,
+                        ST_Transform(ST_SetSRID(ST_MakePoint(%s,%s), %s), 31254))
+                    RETURNING id
+                """, (int(lr_id), float(map_x), float(map_y), int(map_srid)))
+            else:
+                cur.execute(f"""
+                    INSERT INTO lwl."LWL_Knoten"
+                        ("TYP","SUBTYP","LEERROHR_ID","geom","POSITION")
+                    VALUES
+                        ('Virtueller Knoten','split', %s,
+                        ST_Transform(ST_SetSRID(ST_MakePoint(%s,%s), %s), 31254),
+                        %s)
+                    RETURNING id
+                """, (int(lr_id), float(map_x), float(map_y), int(map_srid), pos_val))
+
+            new_id = cur.fetchone()[0]
+            if not isinstance(new_id, int):
+                raise RuntimeError("INSERT in LWL_Knoten hat keine gültige ID geliefert.")
+            return new_id
+        except Exception as e:
+            raise RuntimeError(f'Virtueller Knoten konnte nicht angelegt werden: {e}')
+
+    def _ensure_virtual_nodes_for_splits(self, cur):
+        """
+        Erzeugt – falls gesetzt – für left/right je einen virtuellen Knoten in der DB.
+        Übergibt zusätzlich POSITION (0..1) an den Insert.
+        """
+        canvas = self.iface.mapCanvas()
+        map_srid = canvas.mapSettings().destinationCrs().postgisSrid()
+
+        self.split_virtual_node_ids = {"left": None, "right": None}
+
+        if not getattr(self, "sel_node_id", None):
+            raise RuntimeError("Es ist kein Knoten gewählt. Ohne Knoten keine Verbindung und keine virtuellen Knoten.")
+
+        def _active_lr_id(side: str) -> int | None:
+            cb = self.ui.comboBox_AktivLR1 if side == "left" else self.ui.comboBox_AktivLR2
+            if cb is None:
+                return None
+            data = cb.currentData()
+            if isinstance(data, dict) and "id" in data:
+                return int(data["id"])
+            if isinstance(data, int):
+                return data
+            return None
+
+        for side in ("left", "right"):
+            pt = (self.split_points.get(side) if hasattr(self, "split_points") else None)
+            if not pt:
+                continue
+
+            lr_id = _active_lr_id(side)
+            if not isinstance(lr_id, int):
+                raise RuntimeError(f"Aktives Leerrohr für Seite '{side}' nicht verfügbar.")
+
+            pos01 = None
+            if hasattr(self, "split_position"):
+                pos01 = self.split_position.get(side)
+
+            kid = self._db_create_virtual_node(
+                cur=cur,
+                lr_id=lr_id,
+                map_x=pt.x(),
+                map_y=pt.y(),
+                map_srid=map_srid,
+                common_knoten_id=int(self.sel_node_id),
+                position=pos01
+            )
+            self.split_virtual_node_ids[side] = kid
+
+    def _start_split_pick(self, side: int):
+        """
+        Startet die Splitpunkt-Erfassung entlang des aktuell in comboBox_AktivLR[1|2] gewählten Leerrohrs.
+        - rotes Kreuz gleitet entlang der LR-Geometrie (Map-CRS)
+        - Linksklick fixiert den Punkt
+        - speichert zusätzlich self.split_position['left'|'right'] (0..1)
+        """
+        # aktives LR je Seite auslesen
+        lr_id = None
+        try:
+            cb = self.ui.comboBox_AktivLR1 if side == 1 else self.ui.comboBox_AktivLR2
+            data = cb.currentData() if cb else None
+            if isinstance(data, dict) and "id" in data:
+                lr_id = int(data["id"])
+            elif isinstance(data, int):
+                lr_id = data
+        except Exception:
+            lr_id = None
+
+        if not lr_id:
+            self._status("Kein aktives Leerrohr ausgewählt.", ok=False)
+            return
+
+        lr_layer = self._get_layer("LWL_Leerrohr")
+        if not lr_layer:
+            self._status("Layer 'LWL_Leerrohr' nicht gefunden.", ok=False)
+            return
+        feat = next((f for f in lr_layer.getFeatures(QgsFeatureRequest().setFilterExpression(f'"id" = {lr_id}'))), None)
+        if not feat or not feat.geometry():
+            self._status("Leerrohr-Geometrie nicht gefunden.", ok=False)
+            return
+
+        try:
+            g = QgsGeometry(feat.geometry())
+            tr = QgsCoordinateTransform(lr_layer.crs(), self.iface.mapCanvas().mapSettings().destinationCrs(), QgsProject.instance())
+            _ = g.transform(tr)
+        except Exception as e:
+            self._status(f"CRS-Transformation fehlgeschlagen: {e}", ok=False)
+            return
+
+        canvas = self.iface.mapCanvas()
+        if not hasattr(self, "split_points"):
+            self.split_points = {"left": None, "right": None}
+        if not hasattr(self, "split_markers"):
+            self.split_markers = {"left": None, "right": None}
+        if not hasattr(self, "split_position"):
+            self.split_position = {"left": None, "right": None}  # 0..1
+
+        def _fix(pt_map_xy):
+            key = "left" if side == 1 else "right"
+            self.split_points[key] = pt_map_xy
+
+            # Marker aktualisieren
+            try:
+                mk = self.split_markers.get(key)
+                if mk: mk.hide()
+            except Exception:
+                pass
+            mk = QgsVertexMarker(canvas)
+            mk.setIconType(QgsVertexMarker.ICON_CROSS)
+            mk.setIconSize(14)
+            mk.setPenWidth(3)
+            mk.setColor(Qt.red)
+            mk.setCenter(pt_map_xy)
+            mk.show()
+            self.split_markers[key] = mk
+
+            # Position (0..1) entlang der Linie berechnen
+            perc = self._project_fraction(g, pt_map_xy)  # 0..100
+            pos01 = max(0.0, min(1.0, (perc / 100.0)))
+            self.split_position[key] = pos01
+
+            # UI-Feedback
+            label = self.ui.label_gewaehltes_leerrohr1 if side == 1 else self.ui.label_gewaehltes_leerrohr2
+            try:
+                label.setText(f"Split @ {perc:.1f}% von {self._format_lr_label(lr_id)}")
+                label.setStyleSheet("background-color: lightgreen;")
+            except Exception:
+                pass
+            self._status("Splitpunkt gesetzt.")
+
+        self.map_tool = _SplitPointPickTool(canvas, g, _fix)
+        canvas.setMapTool(self.map_tool)
+        self._status("Bewege das rote Kreuz entlang des Leerrohrs. Linksklick fixiert den Splitpunkt.")
+
     # ---------- Import ----------
     def import_pairs(self):
         """
         Persistiert alle Änderungen:
+        - Vor JEDEM Schreiben: falls Splitpunkte gesetzt → virtuelle Knoten in DB anlegen.
         - Rohr↔Rohr: INSERT neue, UPDATE Status geänderter, DELETE entfernte
         - Leerrohr↔Leerrohr: Status = einheitlicher Rohr-Status, sonst min(Status)
-            * Insert/Update gemäß obigem Aggregat
+            * Insert/Update gemäß Aggregat
             * Delete, wenn zwischen den beiden Leerrohren keine Rohr-Paare mehr existieren
+        - ID_KNOTEN wird IMMER aus self.sel_node_id gesetzt (nie NULL).
         """
         if not (self.is_connected and self.db):
-            self._status("Import: keine DB-Verbindung.", ok=False); return
+            self._status("Import: keine DB-Verbindung.", ok=False)
+            return
+
+        if not getattr(self, "sel_node_id", None):
+            self._status("Import: Es ist kein Knoten gewählt (ID_KNOTEN fehlt).", ok=False)
+            return
 
         # --- aktuelle Szene in Sets überführen ---
         current_pairs = set()      # {(rid_min,rid_max)}
         current_status = {}        # {(rid_min,rid_max): status_id}
-        lr_pairs_current = {}      # {(lr_left,lr_right): [status_id,...]}
+        lr_pairs_current = {}      # {(lr_left,lr_right): [status_id,]}
 
         for entry in self.paired:
             ra, rb = entry.get("rid_left"), entry.get("rid_right")
-            if not (isinstance(ra,int) and isinstance(rb,int)):
-                # falls keine Rohr-IDs vorhanden, überspringen
+            if not (isinstance(ra, int) and isinstance(rb, int)):
                 continue
             pair = (min(ra, rb), max(ra, rb))
-            sid  = int(getattr(entry["line"], "status_id", self.default_status_id))
+            sid = int(getattr(entry["line"], "status_id", self.default_status_id))
             current_pairs.add(pair)
             current_status[pair] = sid
 
-            # LR-Paar sammeln
             lr_pair = (min(entry["left"].lr_id, entry["right"].lr_id),
                     max(entry["left"].lr_id, entry["right"].lr_id))
             lr_pairs_current.setdefault(lr_pair, []).append(sid)
@@ -2271,66 +2685,58 @@ class LeerrohrVerbindenTool(QDialog):
                         if current_status.get(p) != initial_status.get(p))
 
         try:
+            import psycopg2
             with psycopg2.connect(**self.db) as conn:
                 conn.autocommit = False
                 with conn.cursor() as cur:
-                    user = self.settings.value("connection_username","unknown")
+                    user = self.settings.value("connection_username", "unknown")
+
+                    # Session als Verbinder kennzeichnen (wirkt nur innerhalb der Tx)
+                    cur.execute("SET LOCAL application_name = 'leerrohr_verbinder'")
+
+                    # --- NEU: virtuelle Knoten für gesetzte Splitpunkte erzeugen ---
+                    # (macht nichts, wenn keine Splitpunkte gesetzt sind)
+                    self._ensure_virtual_nodes_for_splits(cur)
 
                     # --- DELETE (Rohr↔Rohr) ---
                     del_cnt = 0
-                    for a,b in to_delete:
+                    for a, b in to_delete:
                         cur.execute("""
                             DELETE FROM lwl."LWL_Rohr_Rohr_rel"
                             WHERE LEAST("ID_ROHR_1","ID_ROHR_2")=%s
                             AND GREATEST("ID_ROHR_1","ID_ROHR_2")=%s
-                        """, (a,b))
+                        """, (a, b))
                         del_cnt += cur.rowcount
 
                     # --- UPDATE (Rohr↔Rohr) ---
                     upd_cnt = 0
-                    for a,b in to_update:
-                        sid = current_status[(a,b)]
+                    for a, b in to_update:
+                        sid = current_status[(a, b)]
                         cur.execute("""
                             UPDATE lwl."LWL_Rohr_Rohr_rel"
                             SET "STATUS"=%s, "UPDATEUSER"=%s, "UPDATETIME"=now()
                             WHERE ( "ID_ROHR_1"=%s AND "ID_ROHR_2"=%s )
-                                OR ( "ID_ROHR_1"=%s AND "ID_ROHR_2"=%s )
-                        """, (sid, user, a,b, b,a))
+                            OR ( "ID_ROHR_1"=%s AND "ID_ROHR_2"=%s )
+                        """, (sid, user, a, b, b, a))
                         upd_cnt += cur.rowcount
 
                     # --- INSERT (Rohr↔Rohr) ---
                     ins_cnt = 0
-                    # Map (rid_min,rid_max) -> (lr_left, lr_right, kn)
-                    def shared_knoten(lr1, lr2):
-                        layer_list = QgsProject.instance().mapLayersByName("LWL_Leerrohr")
-                        if not layer_list: return None
-                        layer = layer_list[0]
-                        req = QgsFeatureRequest().setFilterExpression(f'"id" IN ({lr1},{lr2})')
-                        by_id = {f["id"]: f for f in layer.getFeatures(req)}
-                        f1,f2 = by_id.get(lr1), by_id.get(lr2)
-                        if not (f1 and f2): return None
-                        def nodes(f):
-                            names=[fld.name() for fld in f.fields()]; vals=[]
-                            for nm in ("VONKNOTEN","NACHKNOTEN","FROMNODE","TONODE"):
-                                if nm in names: vals.append(f[nm])
-                            return set([int(v) for v in vals if v not in (None,"")])
-                        inter = nodes(f1).intersection(nodes(f2))
-                        return list(inter)[0] if inter else None
 
-                    # Für Inserts brauchen wir die LR-IDs + Knoten: aus self.paired holen
+                    # Map (rid_min,rid_max) -> (lr_left, lr_right)
                     rid_to_lr = {}
                     for entry in self.paired:
                         ra, rb = entry.get("rid_left"), entry.get("rid_right")
-                        if not (isinstance(ra,int) and isinstance(rb,int)):
+                        if not (isinstance(ra, int) and isinstance(rb, int)):
                             continue
                         pair = (min(ra, rb), max(ra, rb))
                         rid_to_lr[pair] = (entry["left"].lr_id, entry["right"].lr_id)
 
-                    for a,b in to_insert:
-                        sid = current_status[(a,b)]
-                        lr_left, lr_right = rid_to_lr.get((a,b), (None,None))
-                        kn = shared_knoten(lr_left, lr_right) if (lr_left and lr_right) else None
+                    # IMMER: ID_KNOTEN = gewählter Knoten
+                    kn = int(self.sel_node_id)
 
+                    for a, b in to_insert:
+                        sid = current_status[(a, b)]
                         cur.execute("""
                             INSERT INTO lwl."LWL_Rohr_Rohr_rel"
                             ("ID_ROHR_1","ID_ROHR_2","STATUS","CREATEUSER","CREATETIME","ID_KNOTEN")
@@ -2339,33 +2745,23 @@ class LeerrohrVerbindenTool(QDialog):
                             SELECT 1 FROM lwl."LWL_Rohr_Rohr_rel"
                             WHERE (("ID_ROHR_1"=%s AND "ID_ROHR_2"=%s) OR ("ID_ROHR_1"=%s AND "ID_ROHR_2"=%s))
                             )
-                        """, (a,b,sid,user,kn,a,b,b,a))
+                        """, (a, b, sid, user, kn, a, b, b, a))
                         ins_cnt += cur.rowcount
 
                     # --- LR↔LR-Relation: Aggregat-Status je LR-Paar ---
-                    # Kandidaten: alle aktuell sichtbaren LR-Paare + jene, die initial vorhanden waren aber jetzt leer sind
                     lr_pairs_all = set(lr_pairs_current.keys()) | set(initial_lr_pairs)
-
                     for lr_left, lr_right in lr_pairs_all:
-                        # Alle Rohr-Status für dieses LR-Paar neu aus der DB ermitteln
                         cur.execute("""
-                            WITH roehre AS (
-                            SELECT r1.id AS rid1, r1."ID_LEERROHR" AS lr1,
-                                    r2.id AS rid2, r2."ID_LEERROHR" AS lr2
-                            FROM lwl."LWL_Rohr" r1
-                            JOIN lwl."LWL_Rohr" r2 ON r1."ID_LEERROHR" = %s AND r2."ID_LEERROHR" = %s
-                            )
                             SELECT DISTINCT rel."STATUS"
                             FROM lwl."LWL_Rohr_Rohr_rel" rel
                             JOIN lwl."LWL_Rohr" a ON a.id = rel."ID_ROHR_1"
                             JOIN lwl."LWL_Rohr" b ON b.id = rel."ID_ROHR_2"
                             WHERE (a."ID_LEERROHR"=%s AND b."ID_LEERROHR"=%s)
                             OR (a."ID_LEERROHR"=%s AND b."ID_LEERROHR"=%s)
-                        """, (lr_left, lr_right, lr_left, lr_right, lr_right, lr_left))
+                        """, (lr_left, lr_right, lr_right, lr_left))
                         st_list = [int(x[0]) for x in cur.fetchall()]
 
                         if not st_list:
-                            # keine Rohr-Verbindungen mehr -> LR↔LR löschen (falls vorhanden)
                             cur.execute("""
                                 DELETE FROM lwl."LWL_Leerrohr_Leerrohr_rel"
                                 WHERE ( "ID_LEERROHR_1"=%s AND "ID_LEERROHR_2"=%s )
@@ -2373,14 +2769,9 @@ class LeerrohrVerbindenTool(QDialog):
                             """, (lr_left, lr_right, lr_right, lr_left))
                             continue
 
-                        # Aggregat: einheitlich -> dieser Wert; sonst kleinster Wert
-                        agg = st_list[0] if all(s==st_list[0] for s in st_list) else min(st_list)
+                        agg = st_list[0] if all(s == st_list[0] for s in st_list) else min(st_list)
 
-                        # Knoten ermitteln
-                        kn = shared_knoten(lr_left, lr_right)
-
-                        # Insert/Update LR↔LR mit Aggregatstatus
-                        # (ohne UNIQUE-Constraint prüfen wir manuell)
+                        # IMMER: ID_KNOTEN = gewählter Knoten
                         cur.execute("""
                             SELECT id FROM lwl."LWL_Leerrohr_Leerrohr_rel"
                             WHERE ( "ID_LEERROHR_1"=%s AND "ID_LEERROHR_2"=%s )
@@ -2391,13 +2782,14 @@ class LeerrohrVerbindenTool(QDialog):
                         if row:
                             cur.execute("""
                                 UPDATE lwl."LWL_Leerrohr_Leerrohr_rel"
-                                SET "STATUS"=%s, "UPDATEUSER"=%s, "UPDATETIME"=now(), "ID_KNOTEN"=COALESCE(%s,"ID_KNOTEN")
+                                SET "STATUS"=%s, "UPDATEUSER"=%s, "UPDATETIME"=now(),
+                                    "ID_KNOTEN"=%s
                                 WHERE id=%s
                             """, (agg, user, kn, row[0]))
                         else:
                             cur.execute("""
                                 INSERT INTO lwl."LWL_Leerrohr_Leerrohr_rel"
-                                    ("ID_LEERROHR_1","ID_LEERROHR_2","STATUS","VERBUND_TYP","CREATEUSER","CREATETIME","ID_KNOTEN")
+                                ("ID_LEERROHR_1","ID_LEERROHR_2","STATUS","VERBUND_TYP","CREATEUSER","CREATETIME","ID_KNOTEN")
                                 VALUES (%s,%s,%s,%s,%s,now(),%s)
                             """, (lr_left, lr_right, agg, "standard", user, kn))
 
@@ -2406,12 +2798,11 @@ class LeerrohrVerbindenTool(QDialog):
             # neuen Ausgangszustand setzen
             self.loaded_pairs_initial = set(current_pairs)
             self.loaded_status_by_pair = dict(current_status)
-            # LR-Paare jetzt aus aktueller Szene
             self.loaded_lr_pairs_initial = set(lr_pairs_current.keys())
 
-            self._status(f"Import/Update ok. Neu: {ins_cnt}, geändert: {upd_cnt}, gelöscht: {del_cnt}.")
+            self._status("Import/Update ok. (Virtuelle Knoten wurden – falls vorhanden – angelegt.)")
         except Exception as e:
-            self._status(f"Import-Fehler: {e}", ok=False)
+            self._status(f"Import fehlgeschlagen: {e}", ok=False)
 
     def _on_mode_changed(self, *_):
         """Reaktiviert die Leerrohrlisten beim Umschalten parallel/lotrecht nach bestätigter Trassenauswahl."""
