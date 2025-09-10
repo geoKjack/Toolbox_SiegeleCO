@@ -60,11 +60,12 @@ class _SplitPointPickTool(QgsMapTool):
     # Kompatibilitäts-Signal: existiert, damit alte disconnect()-Aufrufe nicht krachen
     canvasClicked = pyqtSignal()
 
-    def __init__(self, canvas, lr_geom_map_crs: QgsGeometry, on_fix):
+    def __init__(self, canvas, lr_geom_map_crs: QgsGeometry, on_fix, forbidden_ranges=None):
         super().__init__(canvas)
         self.canvas = canvas
         self.lr_geom = lr_geom_map_crs
         self.on_fix = on_fix
+        self.forbidden = list(forbidden_ranges or [])
         self.marker = QgsVertexMarker(self.canvas)
         self.marker.setIconType(QgsVertexMarker.ICON_CROSS)
         self.marker.setIconSize(12)
@@ -79,10 +80,65 @@ class _SplitPointPickTool(QgsMapTool):
         except Exception:
             return map_pt
 
+    def _length(self) -> float:
+        try:
+            return float(self.lr_geom.length() or 0.0)
+        except Exception:
+            return 0.0
+
+    def _fraction01(self, map_pt) -> float:
+        """
+        0..1 entlang der Linie: Länge vom Start bis zum projizierten Punkt / Gesamtlänge
+        """
+        L = self._length()
+        if L <= 0.0:
+            return 0.0
+        try:
+            pt = self.lr_geom.closestSegmentWithContext(map_pt)[1]
+            tmp = QgsGeometry(self.lr_geom)
+            _ = tmp.splitGeometry([pt], False)
+            l0 = float(tmp.length() or 0.0)
+            return max(0.0, min(1.0, l0 / L))
+        except Exception:
+            return 0.0
+
+    def _nearest_allowed_fraction(self, s: float) -> float:
+        """
+        Liegt s in einem verbotenen Intervall, auf den nächsten Rand klemmen.
+        """
+        if not self.forbidden:
+            return s
+        for a, b in self.forbidden:
+            if a <= s <= b:
+                # zum nahesten Rand springen
+                return a if (s - a) <= (b - s) else b
+        return s
+
+    def _point_at_fraction(self, s: float):
+        """
+        Erzeugt Punkt auf der Linie bei s (0..1).
+        """
+        L = self._length()
+        if L <= 0.0:
+            return None
+        try:
+            d = max(0.0, min(L, s * L))
+            ptg = self.lr_geom.interpolate(d)
+            return ptg.asPoint() if ptg else None
+        except Exception:
+            return None
+
     def canvasMoveEvent(self, e):
         try:
             mp = self.toMapCoordinates(e.pos())
             snap_pt = self._closest_on_lr(mp)
+            s = self._fraction01(snap_pt)
+            s2 = self._nearest_allowed_fraction(s)
+            if s2 != s:
+                p = self._point_at_fraction(s2)
+                if p is not None:
+                    from qgis.core import QgsPointXY
+                    snap_pt = QgsPointXY(p)
             self.marker.setCenter(snap_pt)
             self.marker.show()
         except Exception:
@@ -92,9 +148,15 @@ class _SplitPointPickTool(QgsMapTool):
         if e.button() == Qt.LeftButton:
             mp = self.toMapCoordinates(e.pos())
             snap_pt = self._closest_on_lr(mp)
+            s = self._fraction01(snap_pt)
+            s2 = self._nearest_allowed_fraction(s)
+            if s2 != s:
+                p = self._point_at_fraction(s2)
+                if p is not None:
+                    from qgis.core import QgsPointXY
+                    snap_pt = QgsPointXY(p)
             if callable(self.on_fix):
                 self.on_fix(snap_pt)
-            # Kompatibilitätssignal feuern (damit evtl. disconnect() später existiert)
             try:
                 self.canvasClicked.emit()
             except Exception:
@@ -109,6 +171,7 @@ class _SplitPointPickTool(QgsMapTool):
             self.marker.hide()
         except Exception:
             pass
+
 # --------- Linie mit Status (Kontextmenü) ---------
 class ConnLine(QGraphicsLineItem):
     def __init__(self, line: QLineF, status_id, on_change_status, on_click=None, left_rect=None, right_rect=None):
@@ -590,13 +653,13 @@ class LeerrohrVerbindenTool(QDialog):
         Startet die Splitpunkt-Erfassung entlang des aktuell in comboBox_AktivLR[1|2] gewählten Leerrohrs.
         - rotes Kreuz gleitet entlang der LR-Geometrie (Map-CRS)
         - Linksklick fixiert den Punkt
+        - verbotene Zonen: ±0,10 m um HE-Andockpunkte werden automatisch ausgelassen
         """
-        # aktives LR je Seite auslesen
+        # aktives LR ermitteln
         lr_id = None
         try:
             cb = self.ui.comboBox_AktivLR1 if side == 1 else self.ui.comboBox_AktivLR2
             data = cb.currentData() if cb else None
-            # data kann bereits int oder dict sein (wir setzen in _fill_combo_from_list die UserRole)
             if isinstance(data, dict) and "id" in data:
                 lr_id = int(data["id"])
             elif isinstance(data, int):
@@ -608,11 +671,12 @@ class LeerrohrVerbindenTool(QDialog):
             self._status("Kein aktives Leerrohr ausgewählt.", ok=False)
             return
 
-        # LR-Geometrie holen und in Map-CRS transformieren
+        # LR-Geometrie (Layer-CRS -> Map-CRS)
         lr_layer = self._get_layer("LWL_Leerrohr")
         if not lr_layer:
             self._status("Layer 'LWL_Leerrohr' nicht gefunden.", ok=False)
             return
+        from qgis.core import QgsFeatureRequest, QgsGeometry, QgsCoordinateTransform, QgsProject
         feat = next((f for f in lr_layer.getFeatures(QgsFeatureRequest().setFilterExpression(f'"id" = {lr_id}'))), None)
         if not feat or not feat.geometry():
             self._status("Leerrohr-Geometrie nicht gefunden.", ok=False)
@@ -626,42 +690,32 @@ class LeerrohrVerbindenTool(QDialog):
             self._status(f"CRS-Transformation fehlgeschlagen: {e}", ok=False)
             return
 
-        canvas = self.iface.mapCanvas()
+        # Verbotsintervalle berechnen (± 0,10 m um HE-Andockpunkte)
+        forbidden = []
+        try:
+            forbidden = self._compute_forbidden_ranges_for_he(lr_id, g) or []
+        except Exception:
+            forbidden = []
 
+        # Fix-Callback
         def _fix(pt_map_xy):
-            # Speichern + Marker visualisieren
+            # Prozent (0..100) für UI-Feedback berechnen
+            perc = self._project_fraction(g, pt_map_xy)  # 0..100
             key = "left" if side == 1 else "right"
-            self.split_points[key] = pt_map_xy
-
-            # alten Marker entfernen
-            try:
-                mk = self.split_markers.get(key)
-                if mk: mk.hide()
-            except Exception:
-                pass
-
-            from qgis.gui import QgsVertexMarker
-            mk = QgsVertexMarker(canvas)
-            mk.setIconType(QgsVertexMarker.ICON_CROSS)
-            mk.setIconSize(14)
-            mk.setPenWidth(3)
-            mk.setColor(Qt.red)
-            mk.setCenter(pt_map_xy)
-            mk.show()
-            self.split_markers[key] = mk
-
-            # Info ins Label
-            frac = self._project_fraction(g, pt_map_xy)
+            pos01 = max(0.0, min(1.0, (perc / 100.0)))
+            self.split_position[key] = pos01
+            # Label aktualisieren
             label = self.ui.label_gewaehltes_leerrohr1 if side == 1 else self.ui.label_gewaehltes_leerrohr2
             try:
-                label.setText(f"Split @ {frac:.1f}% von {self._format_lr_label(lr_id)}")
+                label.setText(f"Split @ {perc:.1f}% von {self._format_lr_label(lr_id)}")
                 label.setStyleSheet("background-color: lightgreen;")
             except Exception:
                 pass
             self._status("Splitpunkt gesetzt.")
 
-        # Tool starten
-        self.map_tool = _SplitPointPickTool(canvas, g, _fix)
+        # MapTool starten (mit verbotenen Intervallen)
+        canvas = self.iface.mapCanvas()
+        self.map_tool = _SplitPointPickTool(canvas, g, _fix, forbidden_ranges=forbidden)
         canvas.setMapTool(self.map_tool)
         self._status("Bewege das rote Kreuz entlang des Leerrohrs. Linksklick fixiert den Splitpunkt.")
 
@@ -911,24 +965,76 @@ class LeerrohrVerbindenTool(QDialog):
     def _fill_list_trassen(self, lw, trassen):
         lw.clear()
         for t in trassen:
-            tid, label, _ = (t if isinstance(t, tuple) else (t, f"Trasse {t}", None))
-            it = QListWidgetItem(label)
-            it.setData(Qt.UserRole, int(tid))
+            # t kann id, tuple, dict sein
+            if isinstance(t, tuple):
+                tid, label, _ = t
+            elif isinstance(t, dict):
+                tid = t.get("id") or t.get("lr_id") or t.get("trasse_id") or t.get("ID")
+                label = t.get("label") or t.get("name") or f"Trasse {tid}"
+            else:
+                tid = t
+                label = f"Trasse {t}"
+            if tid is None:
+                continue
+            it = QListWidgetItem(str(label))
+            try:
+                it.setData(Qt.UserRole, int(tid))
+            except Exception:
+                # Fallback: speichere dict, aber klick-handler kann's lesen
+                it.setData(Qt.UserRole, {"id": tid})
             lw.addItem(it)
 
     def _on_left_trasse_chosen(self):
-        """Wenn in Phase 'trassen' links eine Trasse gewählt wurde -> rechts Rest anzeigen."""
+        """Links gewählt → rechts verbleibende anzeigen (robust gegen dict im UserRole)."""
         if self.phase != "trassen":
             return
         it = self.ui.listWidget_Leerohr1.currentItem()
         if not it:
             return
-        self.sel_tr_left = int(it.data(Qt.UserRole))
+
+        sel_raw = it.data(Qt.UserRole)
+        sel_id = self._extract_userrole_id(sel_raw)
+        if sel_id is None:
+            # freundlich abbrechen, keine Exception mehr
+            self.iface.messageBar().pushWarning("Leerrohr verbinden", "Keine gültige ID links ermittelbar.")
+            return
+
+        self.sel_tr_left = int(sel_id)
+
         # rechte Liste = alle linken außer der gewählten
-        left_ids = [self.ui.listWidget_Leerohr1.item(i).data(Qt.UserRole)
-                    for i in range(self.ui.listWidget_Leerohr1.count())]
+        left_ids = []
+        for i in range(self.ui.listWidget_Leerohr1.count()):
+            raw = self.ui.listWidget_Leerohr1.item(i).data(Qt.UserRole)
+            rid = self._extract_userrole_id(raw)
+            if rid is not None:
+                left_ids.append(int(rid))
+
         rest = [tid for tid in left_ids if tid != self.sel_tr_left]
+
+        # vorhandene Füllroutine wiederverwenden
         self._fill_list_trassen(self.ui.listWidget_Leerohr2, rest)
+
+    def _on_right_trasse_chosen(self):
+        """Rechts gewählt (symmetrisch, robust)."""
+        if self.phase != "trassen":
+            return
+        it = self.ui.listWidget_Leerohr2.currentItem()
+        if not it:
+            return
+
+        sel_raw = it.data(Qt.UserRole)
+        sel_id = self._extract_userrole_id(sel_raw)
+        if sel_id is None:
+            self.iface.messageBar().pushWarning("Leerrohr verbinden", "Keine gültige ID rechts ermittelbar.")
+            return
+
+        self.sel_tr_right = int(sel_id)
+
+        # hier ggf. deine bestehende Weiterlogik aufrufen (unverändert)
+        try:
+            self._after_both_trassen_selected()
+        except Exception:
+            pass
 
     def start_pick_lr_relations(self):
         """Map-Pick: bestehende Leerrohr↔Leerrohr-Verbindungen (LWL_Leerrohr_Leerrohr_rel) am Knoten laden."""
@@ -1275,6 +1381,53 @@ class LeerrohrVerbindenTool(QDialog):
             pass
         return False
 
+    def _extract_userrole_id(self, data):
+        """
+        Robust: holt eine int-ID aus data (int/float/str/dict/QVariant).
+        Gibt None zurück, wenn nichts Sinnvolles drin ist.
+        """
+        try:
+            from qgis.PyQt.QtCore import QVariant
+        except Exception:
+            QVariant = None
+
+        # direkte Typen
+        if isinstance(data, int):
+            return data
+        if isinstance(data, float):
+            return int(data)
+        if isinstance(data, str):
+            s = data.strip()
+            return int(s) if s.isdigit() else None
+
+        # dict mit gängigen Schlüsseln
+        if isinstance(data, dict):
+            for k in ("id", "lr_id", "trasse_id", "ID", "Id", "pk"):
+                v = data.get(k)
+                if v is None:
+                    continue
+                try:
+                    return int(v)
+                except Exception:
+                    pass
+            return None
+
+        # QVariant (falls aus Qt)
+        if QVariant is not None and isinstance(data, QVariant):
+            try:
+                # zuerst int
+                iv = int(data)
+                return iv
+            except Exception:
+                try:
+                    s = str(data)
+                    return int(s) if s.isdigit() else None
+                except Exception:
+                    return None
+
+        # unbekannt
+        return None
+
     # =====================================================================
     # AUSWAHL ÜBERNEHMEN (bestehender Flow)
     # =====================================================================
@@ -1397,31 +1550,221 @@ class LeerrohrVerbindenTool(QDialog):
                 pass
             return res
 
+    def _compute_forbidden_ranges_for_he(self, lr_id: int, lr_geom_map_crs) -> list:
+        """
+        Verbotene s-Intervalle (0..1) entlang der LR-Geometrie:
+        ±0,10 m um HE-Andockpunkte. Erkennt HEs sowohl
+        - über LWL_Rohr.ID_HAUSEINFÜHRUNG (falls gesetzt) als auch
+        - direkt über LWL_Hauseinfuehrung (Fallback).
+        """
+        from qgis.core import QgsProject, QgsFeatureRequest, QgsGeometry, QgsCoordinateTransform
+        ranges = []
+        try:
+            total_len = float(lr_geom_map_crs.length() or 0.0)
+        except Exception:
+            total_len = 0.0
+        if total_len <= 0.0:
+            return ranges
+
+        delta_s = 0.10 / total_len  # 10 cm → s
+
+        # Helper: s-Fraction (0..1) eines Map-Punktes auf LR
+        def _fraction01(map_pt) -> float:
+            L = float(lr_geom_map_crs.length() or 0.0)
+            if L <= 0.0:
+                return 0.0
+            try:
+                pt = lr_geom_map_crs.closestSegmentWithContext(map_pt)[1]
+                tmp = QgsGeometry(lr_geom_map_crs)
+                _ = tmp.splitGeometry([pt], False)
+                l0 = float(tmp.length() or 0.0)
+                return max(0.0, min(1.0, l0 / L))
+            except Exception:
+                return 0.0
+
+        # 1) Versuch über LWL_Rohr (ID_HAUSEINFÜHRUNG gesetzt)
+        with self._cursor() as cur:
+            if cur:
+                cur.execute("""
+                    SELECT "FROM_POS","TO_POS"
+                    FROM lwl."LWL_Rohr"
+                    WHERE "ID_LEERROHR"=%s AND "ID_HAUSEINFÜHRUNG" IS NOT NULL
+                """, (int(lr_id),))
+                rows = cur.fetchall() or []
+                for fpos, tpos in rows:
+                    try:
+                        f = float(fpos) if fpos is not None else 0.0
+                        t = float(tpos) if tpos is not None else 0.0
+                    except Exception:
+                        continue
+                    mid = max(0.0, min(1.0, (f + t) * 0.5 if (t > 0.0 or f > 0.0) else f))
+                    a = max(0.0, mid - delta_s)
+                    b = min(1.0, mid + delta_s)
+                    if a < b:
+                        ranges.append((a, b))
+
+        # 2) Fallback über LWL_Hauseinfuehrung (Geometrie projizieren), falls noch nichts gefunden
+        if not ranges:
+            he_layer = None
+            for lyr in QgsProject.instance().mapLayers().values():
+                if lyr.name() == "LWL_Hauseinfuehrung":
+                    he_layer = lyr
+                    break
+            if he_layer:
+                # Transform HE → Map-CRS
+                tr_he = QgsCoordinateTransform(he_layer.crs(), self.iface.mapCanvas().mapSettings().destinationCrs(), QgsProject.instance())
+                req = QgsFeatureRequest().setFilterExpression(f'"ID_LEERROHR" = {int(lr_id)}')
+                for feat in he_layer.getFeatures(req):
+                    g = feat.geometry()
+                    if not g:
+                        continue
+                    try:
+                        gg = QgsGeometry(g)
+                        _ = gg.transform(tr_he)
+                    except Exception:
+                        continue
+                    try:
+                        # Andockpunkt: der Linienendpunkt, der der LR am nächsten liegt
+                        pts = gg.asPolyline() or []
+                        if not pts:
+                            continue
+                        p1 = pts[0]; p2 = pts[-1]
+                        from qgis.core import QgsPointXY
+                        d1 = lr_geom_map_crs.distance(QgsGeometry.fromPointXY(QgsPointXY(p1)))
+                        d2 = lr_geom_map_crs.distance(QgsGeometry.fromPointXY(QgsPointXY(p2)))
+                        anchor = p1 if d1 <= d2 else p2
+                        s = _fraction01(anchor)
+                        a = max(0.0, s - delta_s)
+                        b = min(1.0, s + delta_s)
+                        if a < b:
+                            ranges.append((a, b))
+                    except Exception:
+                        continue
+
+        # Intervalle vereinigen
+        if not ranges:
+            return ranges
+        ranges.sort()
+        merged = []
+        ca, cb = ranges[0]
+        for a, b in ranges[1:]:
+            if a <= cb:
+                cb = max(cb, b)
+            else:
+                merged.append((ca, cb))
+                ca, cb = a, b
+        merged.append((ca, cb))
+        return merged
+
     # --- ERSATZ: nutzt _belegung_cache (lr_id->nr->(occupied,rid)) ---
+    def get_freie_rohrnummern(self, lr_id):
+        """Gibt sortierte Liste freier ROHRNUMMERN am aktuellen Knoten zurück."""
+        belegung = self._get_rohr_belegung(lr_id)
+        frei = [nr for nr, (occ, _) in belegung.items() if not occ]
+        return sorted(frei)
+
+    def get_belegte_rohrnummern(self, lr_id):
+        """Gibt sortierte Liste belegter ROHRNUMMERN am aktuellen Knoten zurück."""
+        belegung = self._get_rohr_belegung(lr_id)
+        belegt = [nr for nr, (occ, _) in belegung.items() if occ]
+        return sorted(belegt)
+
+    def on_node_selected(self, node_id: int):
+        """
+        Setzt den aktiven Verbinder-/Knoten-Kontext für das LVT.
+        Wichtig: invalidiert den Belegungs-Cache, damit pro Knoten neu bewertet wird.
+        """
+        try:
+            self.sel_node_id = int(node_id)
+        except Exception:
+            self.sel_node_id = None
+
+        # Cache leeren (node-spezifisch)
+        self._belegung_cache = {}
+
+        # Optional: UI-Refresh für beide Seiten, falls du dafür Methoden hast
+        try:
+            self._refresh_side_ui(1)
+            self._refresh_side_ui(2)
+        except Exception:
+            pass
+
     def _get_rohr_belegung(self, lr_id):
-        if hasattr(self, "_belegung_cache") and self._belegung_cache.get(int(lr_id)):
-            return dict(self._belegung_cache[int(lr_id)])
-        # Fallback: (selten) direkt laden
-        beleg = {}
+        """
+        Belegung je ROHRNUMMER für EIN Leerrohr am AKTUELL GEWÄHLTEN KNOTEN.
+        - 'Belegt' == es existiert mind. EINE Rohr↔Rohr-Relation (lwl."LWL_Rohr_Rohr_rel")
+        für irgendein Segment dieser Nummer mit rr."ID_KNOTEN" == self.sel_node_id.
+        - Hauseinführungen an ANDEREN Knoten zählen NICHT.
+        Rückgabe: { rohrnr:int -> (occupied:bool, repr_rohr_id:int|None) }
+        """
+        res = {}
+
+        # Knoten-Kontext ist Pflicht (pro Knoten unterschiedliche Belegung!)
+        node_id = getattr(self, "sel_node_id", None)
+        try:
+            lr_id = int(lr_id)
+            node_id = int(node_id) if node_id is not None else None
+        except Exception:
+            return res
+
+        if node_id is None:
+            # kein Knoten gewählt → alles als frei behandeln
+            return res
+
+        # Node-spezifischer Cache
+        key = (lr_id, node_id)
+        if getattr(self, "_belegung_cache", None) and key in self._belegung_cache:
+            return dict(self._belegung_cache[key])
+
         with self._cursor() as cur:
             if cur is None:
-                return beleg
-            try:
-                cur.execute('SELECT "id","ROHRNUMMER","STATUS" FROM lwl."LWL_Rohr" WHERE "ID_LEERROHR"=%s', (int(lr_id),))
-                rows = cur.fetchall()
-                id_by_nr = {int(nr): int(rid) for rid, nr, _ in rows if nr is not None}
-                status_by_id = {int(rid): (str(st).upper() == "VERWENDET") for rid, _, st in rows}
-                cur.execute('SELECT "ID_ROHR_1","ID_ROHR_2" FROM lwl."LWL_Rohr_Rohr_rel" WHERE "ID_ROHR_1" = ANY(%s) OR "ID_ROHR_2" = ANY(%s)',
-                            (list(id_by_nr.values()), list(id_by_nr.values())))
-                belegt = set()
-                for a, b in cur.fetchall():
-                    if a is not None: belegt.add(int(a))
-                    if b is not None: belegt.add(int(b))
-                for nr, rid in id_by_nr.items():
-                    beleg[nr] = ((rid in belegt) or status_by_id.get(rid, False), rid)
-            except Exception:
-                pass
-        return beleg
+                return res
+
+            # 1) Alle Rohr-Segmente des Leerrohrs sammeln: {nr -> set(rohr_ids)}
+            cur.execute("""
+                SELECT id, "ROHRNUMMER"
+                FROM lwl."LWL_Rohr"
+                WHERE "ID_LEERROHR" = %s
+                ORDER BY "ROHRNUMMER" NULLS LAST, id
+            """, (lr_id,))
+            ids_by_nr = {}
+            for rid, rnr in cur.fetchall() or []:
+                if rnr is None:
+                    continue
+                nr = int(rnr)
+                ids_by_nr.setdefault(nr, set()).add(int(rid))
+
+            if not ids_by_nr:
+                self._belegung_cache = getattr(self, "_belegung_cache", {})
+                self._belegung_cache[key] = res
+                return res
+
+            # 2) Flache ID-Liste
+            all_ids = sorted({rid for s in ids_by_nr.values() for rid in s})
+
+            # 3) Nur Relationen AM aktuellen Knoten berücksichtigen
+            cur.execute("""
+                SELECT "ID_ROHR_1", "ID_ROHR_2"
+                FROM lwl."LWL_Rohr_Rohr_rel"
+                WHERE "ID_KNOTEN" = %s
+                AND ("ID_ROHR_1" = ANY(%s) OR "ID_ROHR_2" = ANY(%s))
+            """, (node_id, all_ids, all_ids))
+            occupied_ids = set()
+            for a, b in cur.fetchall() or []:
+                if a is not None: occupied_ids.add(int(a))
+                if b is not None: occupied_ids.add(int(b))
+
+            # 4) Aggregation pro ROHRNUMMER (OR über alle Segmente der Nummer)
+            out = {}
+            for nr, idset in ids_by_nr.items():
+                occ = any(rid in occupied_ids for rid in idset)
+                repr_id = min(idset) if idset else None
+                out[nr] = (occ, repr_id)
+
+        # Cache speichern (pro (LR, Knoten))
+        self._belegung_cache = getattr(self, "_belegung_cache", {})
+        self._belegung_cache[key] = dict(out)
+        return out
 
     # --- ERSATZ: nutzt _color_hex_cache ---
     def _color_hexes_db(self, lr_id: int, rohrnr: int):
