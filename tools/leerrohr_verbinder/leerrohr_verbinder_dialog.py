@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-# Form implementation generated from reading ui file 'tools\leerrohr_verbinder\leerrohr_verbinder_dialog_base.ui'
+# Form implementation generated from reading ui file 'leerrohr_verbinder_dialog_base.ui'
 #
 # Created by: PyQt5 UI code generator 5.15.10
 #
@@ -14,7 +14,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 class Ui_KabelVerlegungsToolDialogBase(object):
     def setupUi(self, KabelVerlegungsToolDialogBase):
         KabelVerlegungsToolDialogBase.setObjectName("KabelVerlegungsToolDialogBase")
-        KabelVerlegungsToolDialogBase.resize(593, 878)
+        KabelVerlegungsToolDialogBase.resize(589, 870)
         self.tabWidget = QtWidgets.QTabWidget(KabelVerlegungsToolDialogBase)
         self.tabWidget.setGeometry(QtCore.QRect(0, 0, 611, 831))
         font = QtGui.QFont()
@@ -44,7 +44,7 @@ class Ui_KabelVerlegungsToolDialogBase(object):
         self.graphicsView_Auswahl_Rrohr1.setObjectName("graphicsView_Auswahl_Rrohr1")
         self.toolBox.addItem(self.page, "")
         self.page_3 = QtWidgets.QWidget()
-        self.page_3.setGeometry(QtCore.QRect(0, 0, 591, 395))
+        self.page_3.setGeometry(QtCore.QRect(0, 0, 100, 30))
         self.page_3.setObjectName("page_3")
         self.listWidget_Verbindungen = QtWidgets.QListWidget(self.page_3)
         self.listWidget_Verbindungen.setGeometry(QtCore.QRect(0, 0, 591, 391))
@@ -73,15 +73,17 @@ class Ui_KabelVerlegungsToolDialogBase(object):
         self.pushButton_verbindung_loeschen = QtWidgets.QPushButton(self.tab)
         self.pushButton_verbindung_loeschen.setGeometry(QtCore.QRect(150, 263, 141, 22))
         self.pushButton_verbindung_loeschen.setObjectName("pushButton_verbindung_loeschen")
-        self.pushButton_leerrohr1 = QtWidgets.QPushButton(self.tab)
-        self.pushButton_leerrohr1.setGeometry(QtCore.QRect(0, 178, 191, 25))
-        self.pushButton_leerrohr1.setObjectName("pushButton_leerrohr1")
+        self.pushButton_split1 = QtWidgets.QPushButton(self.tab)
+        self.pushButton_split1.setEnabled(False)
+        self.pushButton_split1.setGeometry(QtCore.QRect(0, 178, 191, 25))
+        self.pushButton_split1.setObjectName("pushButton_split1")
         self.listWidget_Leerohr1 = QtWidgets.QListWidget(self.tab)
         self.listWidget_Leerohr1.setGeometry(QtCore.QRect(0, 102, 251, 71))
         self.listWidget_Leerohr1.setObjectName("listWidget_Leerohr1")
-        self.pushButton_leerrohr2 = QtWidgets.QPushButton(self.tab)
-        self.pushButton_leerrohr2.setGeometry(QtCore.QRect(400, 178, 191, 25))
-        self.pushButton_leerrohr2.setObjectName("pushButton_leerrohr2")
+        self.pushButton_split2 = QtWidgets.QPushButton(self.tab)
+        self.pushButton_split2.setEnabled(False)
+        self.pushButton_split2.setGeometry(QtCore.QRect(400, 178, 191, 25))
+        self.pushButton_split2.setObjectName("pushButton_split2")
         self.listWidget_Leerohr2 = QtWidgets.QListWidget(self.tab)
         self.listWidget_Leerohr2.setGeometry(QtCore.QRect(350, 102, 241, 71))
         self.listWidget_Leerohr2.setObjectName("listWidget_Leerohr2")
@@ -197,8 +199,8 @@ class Ui_KabelVerlegungsToolDialogBase(object):
         self.pushButton_verbindung.setText(_translate("KabelVerlegungsToolDialogBase", "Verbindung Wählen"))
         self.label_gewaehltes_leerrohr1.setText(_translate("KabelVerlegungsToolDialogBase", "Gewähltes Leerrohr 1"))
         self.pushButton_verbindung_loeschen.setText(_translate("KabelVerlegungsToolDialogBase", "Verbindungen löschen"))
-        self.pushButton_leerrohr1.setText(_translate("KabelVerlegungsToolDialogBase", "Über Karte wählen"))
-        self.pushButton_leerrohr2.setText(_translate("KabelVerlegungsToolDialogBase", "Über Karte wählen"))
+        self.pushButton_split1.setText(_translate("KabelVerlegungsToolDialogBase", "Splitpunkt setzen"))
+        self.pushButton_split2.setText(_translate("KabelVerlegungsToolDialogBase", "Splitpunkt setzen"))
         self.label_gewaehltes_leerrohr2.setText(_translate("KabelVerlegungsToolDialogBase", "Gewähltes Leerrohr 2"))
         self.pushButton_automatisch.setText(_translate("KabelVerlegungsToolDialogBase", "Automatisch verbinden"))
         self.pushButton_Knoten.setText(_translate("KabelVerlegungsToolDialogBase", "Knoten wählen"))
@@ -210,4 +212,4 @@ class Ui_KabelVerlegungsToolDialogBase(object):
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab), _translate("KabelVerlegungsToolDialogBase", "Leerohr Verbinden"))
         self.pushButton_Import.setText(_translate("KabelVerlegungsToolDialogBase", "Import"))
         self.pushButton_Datenpruefung.setText(_translate("KabelVerlegungsToolDialogBase", "Daten Prüfen"))
-from . import Button_checkbox_rc
+import Button_checkbox_rc

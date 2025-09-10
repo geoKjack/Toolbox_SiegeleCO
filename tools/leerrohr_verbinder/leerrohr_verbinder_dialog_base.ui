@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>593</width>
-    <height>878</height>
+    <width>589</width>
+    <height>870</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -89,8 +89,8 @@ QToolBox::tab:selected { background-color: darkgrey; }</string>
        <rect>
         <x>0</x>
         <y>0</y>
-        <width>591</width>
-        <height>395</height>
+        <width>100</width>
+        <height>30</height>
        </rect>
       </property>
       <attribute name="label">
@@ -190,7 +190,10 @@ QToolBox::tab:selected { background-color: darkgrey; }</string>
       <string>Verbindungen löschen</string>
      </property>
     </widget>
-    <widget class="QPushButton" name="pushButton_leerrohr1">
+    <widget class="QPushButton" name="pushButton_split1">
+     <property name="enabled">
+      <bool>false</bool>
+     </property>
      <property name="geometry">
       <rect>
        <x>0</x>
@@ -200,7 +203,7 @@ QToolBox::tab:selected { background-color: darkgrey; }</string>
       </rect>
      </property>
      <property name="text">
-      <string>Über Karte wählen</string>
+      <string>Splitpunkt setzen</string>
      </property>
     </widget>
     <widget class="QListWidget" name="listWidget_Leerohr1">
@@ -213,7 +216,10 @@ QToolBox::tab:selected { background-color: darkgrey; }</string>
       </rect>
      </property>
     </widget>
-    <widget class="QPushButton" name="pushButton_leerrohr2">
+    <widget class="QPushButton" name="pushButton_split2">
+     <property name="enabled">
+      <bool>false</bool>
+     </property>
      <property name="geometry">
       <rect>
        <x>400</x>
@@ -223,7 +229,7 @@ QToolBox::tab:selected { background-color: darkgrey; }</string>
       </rect>
      </property>
      <property name="text">
-      <string>Über Karte wählen</string>
+      <string>Splitpunkt setzen</string>
      </property>
     </widget>
     <widget class="QListWidget" name="listWidget_Leerohr2">
