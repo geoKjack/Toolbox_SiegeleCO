@@ -155,8 +155,8 @@ class LeerrohrVerbindenTool(QDialog):
         self.ui.listWidget_Leerohr2.setSelectionMode(QAbstractItemView.ExtendedSelection)
 
         # Signals: Karten-Pick & Bestätigen
-        self.ui.pushButton_leerrohr1.clicked.connect(lambda: self.start_pick('lr1'))
-        self.ui.pushButton_leerrohr2.clicked.connect(lambda: self.start_pick('lr2'))
+        self.ui.pushButton_split1.clicked.connect(lambda: self.start_pick('lr1'))
+        self.ui.pushButton_split2.clicked.connect(lambda: self.start_pick('lr2'))
         self.ui.pushButton_Auswahl.clicked.connect(self._on_confirm_click)  # <-- NEU: Phase-abhängig
         self.ui.pushButton_verbindung.clicked.connect(self.start_pick_relations)
 
