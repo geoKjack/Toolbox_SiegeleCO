@@ -647,68 +647,68 @@ class HauseinfuehrungsVerlegungsTool(QDialog):
         self.iface.mapCanvas().setMapTool(self.click_selector)
 
     def aktion_abzweig_von_leerrohr(self):
-        """Erster Punkt gleitet entlang des gewählten Leerrohrs."""
-        # Guard
+        """Erster Punkt gleitet entlang des gewählten Leerrohrs (Start nur zwischen 0,01 und 0,99)."""
+        from qgis.core import QgsProject, QgsFeatureRequest, QgsGeometry, QgsCoordinateTransform, Qgis
+        # Guard: es muss ein Parent-LR oder eine Abzweigung gewählt sein (wie bisher)
         if not getattr(self, "startpunkt_id", None) and not getattr(self, "abzweigung_id", None):
-            self.iface.messageBar().pushMessage("Fehler", "Kein Parent-Leerrohr/Abzweigung gewählt.", level=Qgis.Critical)
+            self._msg("warn", "Bitte zuerst ein Parent-Leerrohr oder eine Abzweigung wählen.")
             return
 
-        # Geometrie + CRS holen
-        if self.abzweigung_id:
-            layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr_Abzweigung")[0]
-            feat = next((f for f in layer.getFeatures() if f["id"] == self.abzweigung_id), None)
-        else:
-            layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr")[0]
-            feat = next((f for f in layer.getFeatures() if f["id"] == self.startpunkt_id), None)
+        # Aktives LR ermitteln (wie in deiner bisherigen Methode)
+        lr_layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr")
+        if not lr_layer:
+            self._msg("error", "Layer 'LWL_Leerrohr' nicht gefunden.")
+            return
+        lr_layer = lr_layer[0]
 
-        if not feat:
-            self.iface.messageBar().pushMessage("Fehler", "Parent-Feature nicht gefunden.", level=Qgis.Critical)
+        # Aktuelles LR-Feature bestimmen (du nutzt dafür i. d. R. self.startpunkt_id / self.abzweigung_id / Auswahl)
+        lr_id = getattr(self, "startpunkt_id", None) or getattr(self, "abzweigung_id", None)
+        if not lr_id:
+            self._msg("warn", "Kein Leerrohr für den Start ermittelt.")
             return
 
-        g = QgsGeometry(feat.geometry())
-        # in Karten-CRS transformieren
-        tr = QgsCoordinateTransform(layer.crs(), self.iface.mapCanvas().mapSettings().destinationCrs(), QgsProject.instance())
-        _ = g.transform(tr)
+        f = next((ft for ft in lr_layer.getFeatures(QgsFeatureRequest().setFilterExpression(f'"id" = {int(lr_id)}'))), None)
+        if not f or not f.geometry():
+            self._msg("error", "Leerrohr-Geometrie nicht gefunden.")
+            return
 
-        # Finish-Callback: speichere resultierende Linie
+        # Geometrie in Map-CRS transformieren
+        try:
+            g = QgsGeometry(f.geometry())
+            tr = QgsCoordinateTransform(lr_layer.crs(), self.iface.mapCanvas().mapSettings().destinationCrs(), QgsProject.instance())
+            _ = g.transform(tr)
+        except Exception as e:
+            self._msg("error", f"CRS-Transformation fehlgeschlagen: {e}")
+            return
+
+        # Callback für Abschluss
         def on_finish(points):
             if len(points) < 2:
-                self.iface.messageBar().pushMessage("Fehler", "Mindestens zwei Punkte erforderlich.", level=Qgis.Critical); return
-
-            # Falls ein Ziel-Leerrohr gewählt ist: P[0] (LR-Seite) exakt aufs LR snappen
-            try:
-                lr_id = getattr(self, "startpunkt_id", None)
-                if lr_id:
-                    lr_layer = QgsProject.instance().mapLayersByName("LWL_Leerrohr")[0]
-                    lr_feat = next((f for f in lr_layer.getFeatures() if f["id"] == lr_id), None)
-                    if lr_feat:
-                        # in Karten-CRS transformieren
-                        from qgis.core import QgsCoordinateTransform, QgsProject, QgsGeometry
-                        g_lr = QgsGeometry(lr_feat.geometry())
-                        tr = QgsCoordinateTransform(lr_layer.crs(), self.iface.mapCanvas().mapSettings().destinationCrs(), QgsProject.instance())
-                        _ = g_lr.transform(tr)
-                        # P[0] auf LR projizieren (P[0] ist LR-Ende der übernommenen HA)
-                        p0 = points[0]
-                        p0s = g_lr.closestSegmentWithContext(p0)[1]
-                        points[0] = QgsPointXY(p0s)
-            except Exception:
-                pass
-
+                self._msg("error", "Mindestens zwei Punkte erforderlich.")
+                return
             self.erfasste_geom = QgsGeometry.fromPolylineXY(points)
             self.result_rb.setToGeometry(self.erfasste_geom, None)
-            self.iface.messageBar().pushMessage("Info", "HA-Linie ab bestehender HA erfasst.", level=Qgis.Success)
-            self.iface.mapCanvas().unsetMapTool(self.map_tool)
+            self._msg("ok", "HA-Linie erfasst.")
 
-        # Optional: pro Klick noch was tun (z. B. ersten Punkt merken)
-        def on_point(p):
-            if len(getattr(self, "erfasste_punkte", [])) == 0:
-                self.erfasste_punkte = [p]
-            else:
-                self.erfasste_punkte.append(p)
+        # MapTool starten (mode='lr'); freier Startbereich strikt [0.01, 0.99]
+        self.map_tool = GuidedStartLineTool(
+            self.iface.mapCanvas(),
+            g,
+            on_finish,
+            mode="lr",
+            persist_rb=self.result_rb
+        )
+        # Intervall setzen: bestehendes freies Intervall mit [0.01, 0.99] schneiden
+        base_interval = getattr(self, "freies_intervall", (0.0, 1.0))
+        a = max(0.01, float(base_interval[0] if base_interval else 0.0))
+        b = min(0.99, float(base_interval[1] if base_interval else 1.0))
+        if a >= b:
+            # Falls kein Schnitt – erzwinge Standard 0.01..0.99
+            a, b = 0.01, 0.99
+        self.map_tool.free_interval = (a, b)
 
-        self.map_tool = GuidedStartLineTool(self.iface.mapCanvas(), g, on_finish, on_point)
         self.iface.mapCanvas().setMapTool(self.map_tool)
-        self.iface.messageBar().pushMessage("Info", "Klicken: Punkte setzen • Rechtsklick: beenden. Erster Punkt gleitet am Leerrohr.", level=Qgis.Info)
+        self.iface.messageBar().pushMessage("Info", f"Klicken: Punkte setzen • Rechtsklick: beenden. Start nur zwischen {a:.2f} und {b:.2f}.", level=Qgis.Info)
 
     def aktion_abzweig_von_bestehender_ha(self):
         """Abzweig von bestehender HA:

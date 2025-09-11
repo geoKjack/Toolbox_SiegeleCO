@@ -2057,26 +2057,47 @@ class LeerrohrVerbindenTool(QDialog):
         x=base_x
         font_num = QFont(); font_num.setPointSize(8)
 
+        # kleine Inline-Funktion: prim/sek-Farbe entsättigen + etwas transparenter
+        def _desat(hex_or_qcolor):
+            c = QColor(hex_or_qcolor)
+            h, s, v, a = c.getHsv()
+            s = max(0, int(s * 0.33))    # ~55% weniger Sättigung
+            a = max(0, int(a * 0.85))    # leicht transparenter
+            c.setHsv(h, s, v, a)
+            return c
+
         for nr in range(1, n+1):
             prim, sec = farben.get(nr, ("#808080", None))
             occupied, rid = beleg.get(nr, (False, None))
             prim_name = self._color_name(prim)
 
             r = ClickableRect(x, base_y, sq, side, bar_idx, lr["id"], nr, occupied, self.on_rect_click,
-                              prim_hex=prim, prim_name=prim_name)
+                            prim_hex=prim, prim_name=prim_name)
             self.scene.addItem(r)
-            # diagonal füllen
+
+            # diagonal füllen (zwei Dreiecke)
             p1=[QPointF(x,base_y), QPointF(x+sq,base_y), QPointF(x,base_y+sq)]
             p2=[QPointF(x+sq,base_y), QPointF(x+sq,base_y+sq), QPointF(x,base_y+sq)]
-            t1=QGraphicsPolygonItem(QPolygonF(p1), r); t2=QGraphicsPolygonItem(QPolygonF(p2), r)
+            t1=QGraphicsPolygonItem(QPolygonF(p1), r)
+            t2=QGraphicsPolygonItem(QPolygonF(p2), r)
+
             if occupied:
-                g = QColor("#808080"); t1.setBrush(QBrush(g)); t2.setBrush(QBrush(g))
-                r.setPen(QPen(Qt.red, 2)); r.setToolTip(f"Rohr {nr}: belegt")
+                # statt Grau: prim/sek entsättigt + leicht transparenter
+                c1 = _desat(prim)
+                c2 = _desat(sec) if sec else c1
+                t1.setBrush(QBrush(c1))
+                t2.setBrush(QBrush(c2))
+                r.setPen(QPen(Qt.red, 2))
+                r.setToolTip(f"Rohr {nr}: belegt")
             else:
-                c1=QColor(prim); t1.setBrush(QBrush(c1))
-                c2=QColor(sec) if sec else c1; t2.setBrush(QBrush(c2))
+                c1 = QColor(prim)
+                c2 = QColor(sec) if sec else c1
+                t1.setBrush(QBrush(c1))
+                t2.setBrush(QBrush(c2))
                 r.setToolTip(f"Rohr {nr}: frei ({prim_name})")
-            t1.setPen(QPen(Qt.NoPen)); t2.setPen(QPen(Qt.NoPen))
+
+            t1.setPen(QPen(Qt.NoPen))
+            t2.setPen(QPen(Qt.NoPen))
 
             # Nummer mittig
             txt=self.scene.addText(str(nr), font_num)
